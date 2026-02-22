@@ -15,8 +15,8 @@ CLEAN_TXT = os.path.join(DATA_DIR, "book_clean.txt")
 CHUNKS_JSONL = os.path.join(DATA_DIR, "chunks.jsonl")
 
 # Chunking parameters
-CHUNK_SIZE = 500       # approximate tokens (words)
-CHUNK_OVERLAP = 100    # overlap in words
+CHUNK_SIZE = 150      # smaller chunks = more precise retrieval
+CHUNK_OVERLAP = 30   # overlap to avoid cutting mid-sentence
 
 def extract_text(pdf_path: str) -> str:
     """Extract all text from PDF using PyMuPDF (fitz), which handles Arabic text correctly."""
