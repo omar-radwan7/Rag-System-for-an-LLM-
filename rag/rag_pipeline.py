@@ -122,6 +122,16 @@ def retrieve_multi(query: str, top_k: int = 5) -> tuple:
     return all_chunks[:top_k], retrieval_time
 
 
+CHARACTER_FACTS = """
+معلومات ثابتة عن شخصيات الرواية (استخدمها كمرجع):
+- النمرود (زاهاك / الضحاك): الملك الطاغية الذي بنى برج بابل في بابل (العراق). قتل والده وادعى الألوهية. مات بسبب بعوضة دخلت في منخره ووصلت إلى مخه.
+- إبراهيم (عليه السلام): النبي الذي حاول النمرود قتله. ألقاه في النار لكن الله نجّاه.
+- كاوي: الحداد (النحّاس) الذي تمرد على النمرود بعد أن قتل جنوده أبناءه. ليس نبياً.
+- سميراميس: زوجة النمرود الجميلة الذكية ذات الشعر الذهبي البني الطويل. حكمت بعد وفاة النمرود.
+- لوسيفر (إبليس): علّم النمرود السحر والقوة. لاحقاً تمرد عليه النمرود.
+"""
+
+
 def build_rag_prompt(question: str, chunks: list, history: list = None) -> str:
     """Build the Arabic RAG prompt with context and optional history."""
     context = "\n\n---\n\n".join([c["text"] for c in chunks])
@@ -140,7 +150,7 @@ def build_rag_prompt(question: str, chunks: list, history: list = None) -> str:
 2. لا تخلق أو تخترع أي معلومات من خارج النص.
 3. إذا كان السياق لا يحتوي على إجابة، قل حصراً: "لا يوجد في النص".
 4. كن مختصراً.
-
+{CHARACTER_FACTS}
 {hist_str}السياق المتاح من الكتاب:
 {context}
 
