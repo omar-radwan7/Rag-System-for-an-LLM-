@@ -21,6 +21,9 @@ def generate(model: str, prompt: str, system: str = "", temperature: float = 0.7
         "options": {
             "temperature": temperature,
             "num_predict": max_tokens,
+            "repeat_penalty": 1.0,
+            "top_p": 0.9,
+            "top_k": 40,
         },
     }
     if system:
@@ -51,6 +54,9 @@ def generate_stream(model: str, prompt: str, system: str = "", temperature: floa
         "options": {
             "temperature": temperature,
             "num_predict": max_tokens,
+            "repeat_penalty": 1.0,
+            "top_p": 0.9,
+            "top_k": 40,
         },
     }
     if system:

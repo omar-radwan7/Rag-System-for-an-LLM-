@@ -78,6 +78,50 @@ def retrieve(query: str, top_k: int = 5) -> tuple:
     return results, retrieval_time
 
 
+# Arabic character name aliases found in the book
+_NAME_ALIASES = {
+    "زهاك": ["زاهاك", "الضحاك", "النمرود"],
+    "زاهاك": ["الضحاك", "النمرود", "زهاك"],
+    "الضحاك": ["زاهاك", "النمرود", "زهاك"],
+    "النمرود": ["زاهاك", "الضحاك"],
+    "لوسيفر": ["إبليس", "الشيطان"],
+    "سميراميس": ["سميرامس"],
+    "سيربنت": ["الثعبان", "الأفعى"],
+}
+
+def _expand_query(query: str) -> list:
+    """Returns a list of search queries: original + alias expansions."""
+    queries = [query]
+    for name, aliases in _NAME_ALIASES.items():
+        if name in query:
+            for alias in aliases:
+                queries.append(query.replace(name, alias))
+    return queries
+
+
+def retrieve_multi(query: str, top_k: int = 5) -> tuple:
+    """
+    Search using multiple query variants (aliases) and merge + deduplicate results.
+    Returns (chunks_list, retrieval_time).
+    """
+    queries = _expand_query(query)
+    seen_ids = set()
+    all_chunks = []
+    start = time.time()
+
+    for q in queries:
+        chunks, _ = retrieve(q, top_k=top_k)
+        for c in chunks:
+            if c["chunk_id"] not in seen_ids:
+                seen_ids.add(c["chunk_id"])
+                all_chunks.append(c)
+
+    # Sort by score descending and take the best top_k
+    all_chunks.sort(key=lambda x: x.get("score", 0), reverse=True)
+    retrieval_time = round(time.time() - start, 3)
+    return all_chunks[:top_k], retrieval_time
+
+
 def build_rag_prompt(question: str, chunks: list, history: list = None) -> str:
     """Build the Arabic RAG prompt with context and optional history."""
     context = "\n\n---\n\n".join([c["text"] for c in chunks])
@@ -90,12 +134,12 @@ def build_rag_prompt(question: str, chunks: list, history: list = None) -> str:
             hist_str += f"{role}: {msg['content']}\n"
         hist_str += "\n"
 
-    prompt = f"""أنت مساعد ذكي وخبير باللغة العربية. مهمتك هي الإجابة على السؤال بناءً على السياق المرفق فقط.
-تعليمات صارمة:
-1. أجب باللغة العربية الفصحى السليمة فقط. يمنع منعاً باتاً استخدام اللغة الإنجليزية أو أي حروف أجنبية.
-2. لا تخلق أو تخترع أي معلومات، إجابتك يجب أن تكون مستخرجة حصراً من السياق.
-3. إذا كان السياق لا يحتوي على إجابة للسؤال، قل فقط: "لا يوجد في النص".
-4. كن مختصراً ودقيقاً.
+    prompt = f"""أنت مساعد ذكي وخبير باللغة العربية الفصحى. مهمتك هي الإجابة على السؤال بدقة متناهية بناءً على السياق المتاح فقط.
+تعليمات:
+1. صغ الإجابة بعناية باللغة العربية الفصحى.
+2. لا تخلق أو تخترع أي معلومات من خارج النص.
+3. إذا كان السياق لا يحتوي على إجابة، قل حصراً: "لا يوجد في النص".
+4. كن مختصراً.
 
 {hist_str}السياق المتاح من الكتاب:
 {context}
@@ -122,7 +166,7 @@ def ask(question: str, model: str = None, top_k: int = 2, history: list = None) 
     if history and len(question.split()) < 4 and len(history) >= 2:
         search_query = f"{history[-2]['content']} {question}"
         
-    chunks, retrieval_time = retrieve(search_query, top_k=top_k)
+    chunks, retrieval_time = retrieve_multi(search_query, top_k=top_k)
     chunk_ids = [c["chunk_id"] for c in chunks]
 
     # Build prompt and generate
@@ -152,7 +196,7 @@ def ask_stream(question: str, model: str = None, top_k: int = 2, history: list =
     if history and len(question.split()) < 4 and len(history) >= 2:
         search_query = f"{history[-2]['content']} {question}"
         
-    chunks, retrieval_time = retrieve(search_query, top_k=top_k)
+    chunks, retrieval_time = retrieve_multi(search_query, top_k=top_k)
     chunk_ids = [c["chunk_id"] for c in chunks]
 
     # Build prompt and generate stream

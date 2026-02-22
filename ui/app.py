@@ -143,7 +143,7 @@ with st.sidebar:
     show_sources = st.toggle("إظهار المصادر", value=True)
 
     # Top-K
-    top_k = st.slider("عدد المقاطع المسترجعة", 1, 3, 1)
+    top_k = st.slider("عدد المقاطع المسترجعة", 1, 5, 2)
 
     st.markdown("---")
 
