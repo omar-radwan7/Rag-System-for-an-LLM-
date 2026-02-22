@@ -90,8 +90,12 @@ def build_rag_prompt(question: str, chunks: list, history: list = None) -> str:
             hist_str += f"{role}: {msg['content']}\n"
         hist_str += "\n"
 
-    prompt = f"""أجب باستخدام السياق فقط وبشكل مختصر (لا تتجاوز 100 كلمة).
-إذا لم تجد الإجابة قل: لا يوجد في النص.
+    prompt = f"""أنت مساعد ذكي وخبير باللغة العربية. مهمتك هي الإجابة على السؤال بناءً على السياق المرفق فقط.
+تعليمات صارمة:
+1. أجب باللغة العربية الفصحى السليمة فقط. يمنع منعاً باتاً استخدام اللغة الإنجليزية أو أي حروف أجنبية.
+2. لا تخلق أو تخترع أي معلومات، إجابتك يجب أن تكون مستخرجة حصراً من السياق.
+3. إذا كان السياق لا يحتوي على إجابة للسؤال، قل فقط: "لا يوجد في النص".
+4. كن مختصراً ودقيقاً.
 
 {hist_str}السياق المتاح من الكتاب:
 {context}
@@ -99,7 +103,7 @@ def build_rag_prompt(question: str, chunks: list, history: list = None) -> str:
 السؤال الحالي:
 {question}
 
-الإجابة:"""
+الإجابة باللغة العربية:"""
     return prompt
 
 
@@ -124,7 +128,7 @@ def ask(question: str, model: str = None, top_k: int = 2, history: list = None) 
     # Build prompt and generate
     rag_prompt = build_rag_prompt(question, chunks, history)
     start = time.time()
-    result = generate(model, rag_prompt, temperature=0.3, max_tokens=150)
+    result = generate(model, rag_prompt, temperature=0.1, max_tokens=150)
     generation_time = round(time.time() - start, 3)
 
     return {
@@ -155,7 +159,7 @@ def ask_stream(question: str, model: str = None, top_k: int = 2, history: list =
     rag_prompt = build_rag_prompt(question, chunks, history)
     
     start = time.time()
-    stream = generate_stream(model, rag_prompt, temperature=0.3, max_tokens=150)
+    stream = generate_stream(model, rag_prompt, temperature=0.1, max_tokens=150)
     
     return stream, chunk_ids, retrieval_time, start
 
