@@ -123,12 +123,13 @@ def retrieve_multi(query: str, top_k: int = 5) -> tuple:
 
 
 CHARACTER_FACTS = """
-معلومات ثابتة عن شخصيات الرواية (استخدمها كمرجع):
-- النمرود (زاهاك / الضحاك): الملك الطاغية الذي بنى برج بابل في بابل (العراق). قتل والده وادعى الألوهية. مات بسبب بعوضة دخلت في منخره ووصلت إلى مخه.
-- إبراهيم (عليه السلام): النبي الذي حاول النمرود قتله. ألقاه في النار لكن الله نجّاه.
-- كاوي: الحداد (النحّاس) الذي تمرد على النمرود بعد أن قتل جنوده أبناءه. ليس نبياً.
-- سميراميس: زوجة النمرود الجميلة الذكية ذات الشعر الذهبي البني الطويل. حكمت بعد وفاة النمرود.
-- لوسيفر (إبليس): علّم النمرود السحر والقوة. لاحقاً تمرد عليه النمرود.
+معلومات ثابتة عن شخصيات الرواية (استخدمها كمرجع دائماً):
+- النمرود (زاهاك / الضحاك): الملك الطاغية الذي بنى برج بابل في بابل ببلاد الرافدين (العراق حالياً). قتل والده وادعى الألوهية. مات بسبب بعوضة دخلت في منخره وصعدت إلى مخه.
+- إبراهيم (عليه السلام): النبي الذي حاول النمرود قتله بإلقائه في النار، لكن الله نجّاه.
+- كاوي: الحداد/النحّاس الذي تمرد على النمرود انتقاماً لأبنائه. ليس نبياً.
+- سميراميس: زوجة النمرود. تُوصف بأنها ذكية وجميلة ذات شعر ذهبي بني طويل. حكمت بعد وفاة النمرود خمس سنوات.
+- لوسيفر: هذا هو الاسم المحدد للشيطان في هذه الرواية. لوسيفر (إبليس) هو الذي علّم النمرود السحر والقوة، ثم تمرد عليه النمرود لاحقاً. عند السؤال عن 'الشيطان مع النمرود' فإن اسمه هو لوسيفر وليس شيطان رجيم.
+- سيربنت / الأفعى: رمز آخر لإبليس في الرواية.
 """
 
 
@@ -138,8 +139,8 @@ def build_rag_prompt(question: str, chunks: list, history: list = None) -> str:
     
     hist_str = ""
     if history and len(history) > 0:
-        hist_str = "سجل المحادثة السابقة:\n"
-        for msg in history[-4:]: # keep last 2 turns
+        hist_str = "سجل المحادثة السابقة (استخدمه لفهم السياق والضمائر في السؤال الحالي):\n"
+        for msg in history[-6:]:  # keep last 3 turns
             role = "المستخدم" if msg["role"] == "user" else "الذكاء الاصطناعي"
             hist_str += f"{role}: {msg['content']}\n"
         hist_str += "\n"
@@ -171,9 +172,10 @@ def ask(question: str, model: str = None, top_k: int = 2, history: list = None) 
         cfg = _load_config()
         model = cfg.get("chosen_model") or cfg["models"][0]
 
-    # Retrieve (combine with last question if current is short for better context)
+    # Retrieve: always prepend recent history topic to query to improve context recall
     search_query = question
-    if history and len(question.split()) < 4 and len(history) >= 2:
+    if history and len(history) >= 2 and len(question.split()) < 12:
+        # Combine with the previous user question for richer semantic search
         search_query = f"{history[-2]['content']} {question}"
         
     chunks, retrieval_time = retrieve_multi(search_query, top_k=top_k)
@@ -201,9 +203,9 @@ def ask_stream(question: str, model: str = None, top_k: int = 2, history: list =
         cfg = _load_config()
         model = cfg.get("chosen_model") or cfg["models"][0]
 
-    # Retrieve
+    # Retrieve: always prepend recent history topic to query to improve context recall
     search_query = question
-    if history and len(question.split()) < 4 and len(history) >= 2:
+    if history and len(history) >= 2 and len(question.split()) < 12:
         search_query = f"{history[-2]['content']} {question}"
         
     chunks, retrieval_time = retrieve_multi(search_query, top_k=top_k)
