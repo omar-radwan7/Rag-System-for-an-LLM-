@@ -1,0 +1,182 @@
+[
+    {
+        "question_id": 1,
+        "question": "من هو بطل رواية أنتيخريستوس؟",
+        "expected_answer_short": "بطل الرواية هو الراوي الذي يروي أحداث القصة",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 2,
+        "question": "ما هو الموضوع الرئيسي لرواية أنتيخريستوس؟",
+        "expected_answer_short": "نظريات المؤامرة والجمعيات السرية والأحداث الخارقة",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 3,
+        "question": "من هو المسيح الدجال في الرواية؟",
+        "expected_answer_short": "شخصية شريرة مرتبطة بنهاية العالم",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 4,
+        "question": "ما هي الجمعيات السرية المذكورة في الرواية؟",
+        "expected_answer_short": "الماسونية والإلوميناتي وفرسان الهيكل",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 5,
+        "question": "ما علاقة الرواية بالأحداث التاريخية؟",
+        "expected_answer_short": "تربط بين أحداث تاريخية حقيقية ونظريات مؤامرة",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 6,
+        "question": "كيف تبدأ أحداث الرواية؟",
+        "expected_answer_short": "تبدأ بمقدمة تمهيدية عن الصراع بين الخير والشر",
+        "chapter_optional": "الفصل الأول"
+    },
+    {
+        "question_id": 7,
+        "question": "ما هو دور الشيطان في الرواية؟",
+        "expected_answer_short": "الشيطان يمثل القوة الخفية التي تتحكم في الأحداث",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 8,
+        "question": "هل تتضمن الرواية أحداثاً تاريخية حقيقية؟",
+        "expected_answer_short": "نعم، تتضمن إشارات لأحداث تاريخية حقيقية",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 9,
+        "question": "ما هي نبوءات نهاية العالم المذكورة في الرواية؟",
+        "expected_answer_short": "نبوءات مرتبطة بظهور المسيح الدجال وعلامات الساعة",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 10,
+        "question": "كيف تصف الرواية العلاقة بين الأديان؟",
+        "expected_answer_short": "تتناول نقاط التقاء وتقاطع بين الأديان السماوية",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 11,
+        "question": "ما هو أسلوب الكاتب في السرد؟",
+        "expected_answer_short": "أسلوب تشويقي يمزج بين الواقع والخيال",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 12,
+        "question": "من هو مؤلف رواية أنتيخريستوس؟",
+        "expected_answer_short": "أحمد خالد مصطفى",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 13,
+        "question": "ما هي فكرة الصراع الأزلي في الرواية؟",
+        "expected_answer_short": "الصراع بين قوى الخير والشر عبر التاريخ",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 14,
+        "question": "كيف تتعامل الرواية مع موضوع السحر؟",
+        "expected_answer_short": "تصور السحر كأداة من أدوات الشر والسيطرة",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 15,
+        "question": "ما هي الرموز المستخدمة في الرواية؟",
+        "expected_answer_short": "رموز ماسونية وعين الدجال والأهرامات وغيرها",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 16,
+        "question": "هل تنتهي الرواية بنهاية مفتوحة؟",
+        "expected_answer_short": "الرواية جزء من سلسلة لذا تترك أسئلة مفتوحة",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 17,
+        "question": "ما هي الأماكن الرئيسية في الرواية؟",
+        "expected_answer_short": "أماكن تاريخية ودينية متعددة حول العالم",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 18,
+        "question": "كيف تصور الرواية نهاية العالم؟",
+        "expected_answer_short": "تصور نهاية العالم من خلال علامات وأحداث متتالية",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 19,
+        "question": "ما هو دور فرسان الهيكل في الرواية؟",
+        "expected_answer_short": "فرسان الهيكل كجمعية سرية لها أهداف خفية",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 20,
+        "question": "كيف يربط الكاتب بين الماضي والحاضر؟",
+        "expected_answer_short": "من خلال سرد أحداث تاريخية وربطها بالواقع المعاصر",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 21,
+        "question": "ما هي الرسالة الأساسية للرواية؟",
+        "expected_answer_short": "التحذير من القوى الخفية والدعوة للوعي",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 22,
+        "question": "هل يستخدم الكاتب مصادر دينية في الرواية؟",
+        "expected_answer_short": "نعم، يستشهد بنصوص من القرآن والأحاديث النبوية",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 23,
+        "question": "ما هو مفهوم النظام العالمي الجديد في الرواية؟",
+        "expected_answer_short": "مخطط للسيطرة على العالم من قبل قوى خفية",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 24,
+        "question": "كيف تتناول الرواية موضوع التكنولوجيا؟",
+        "expected_answer_short": "كأداة للمراقبة والسيطرة في يد القوى الخفية",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 25,
+        "question": "ما هي الشخصيات التاريخية المذكورة في الرواية؟",
+        "expected_answer_short": "شخصيات مثل الإسكندر الأكبر وصلاح الدين وغيرهم",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 26,
+        "question": "كيف تصف الرواية العلاقة بين العلم والدين؟",
+        "expected_answer_short": "تحاول الربط بين الاكتشافات العلمية والحقائق الدينية",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 27,
+        "question": "ما هو دور مصر في أحداث الرواية؟",
+        "expected_answer_short": "مصر والأهرامات لها دور محوري في الأحداث",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 28,
+        "question": "هل الرواية مناسبة لجميع الأعمار؟",
+        "expected_answer_short": "تحتوي على مواضيع معقدة قد لا تناسب الأطفال",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 29,
+        "question": "كيف تعالج الرواية مفهوم الحرية والعبودية؟",
+        "expected_answer_short": "تطرح فكرة أن البشر مستعبدون دون أن يدركوا",
+        "chapter_optional": ""
+    },
+    {
+        "question_id": 30,
+        "question": "ما هي الأحداث الخارقة في الرواية؟",
+        "expected_answer_short": "أحداث مرتبطة بالجن والسحر والقوى الخارقة",
+        "chapter_optional": ""
+    }
+]
