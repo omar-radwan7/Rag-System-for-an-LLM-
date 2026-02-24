@@ -8,5 +8,5 @@
   "embedding_model": "intfloat/multilingual-e5-small",
   "chunk_size_tokens": 500,
   "chunk_overlap_tokens": 100,
-  "top_k_retrieval": 2
+  "top_k_retrieval": 3
 }

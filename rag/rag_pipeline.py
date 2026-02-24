@@ -5,6 +5,7 @@ rag_pipeline.py — Full RAG pipeline: embed query → retrieve from FAISS → p
 
 import json
 import os
+import re
 import sys
 import time
 import numpy as np
@@ -20,6 +21,35 @@ METADATA_PATH = os.path.join(RAG_DIR, "chunk_metadata.json")
 _embed_model = None
 _faiss_index = None
 _metadata = None
+
+# System prompt to ensure Arabic output without breaking whitespace generation
+SYSTEM_PROMPT = "أجب دائماً باللغة العربية الفصحى الواضحة."
+
+
+def clean_arabic_text(text: str) -> str:
+    """Remove non-Arabic characters from full (non-streaming) model output."""
+    cleaned = re.sub(
+        r'[\u2E80-\u9FFF\uAC00-\uD7AF\u3040-\u30FF\u31F0-\u31FF\uFF00-\uFFEF]',
+        '', text
+    )
+    cleaned = re.sub(r'  +', ' ', cleaned)
+    return cleaned.strip()  # OK to strip for full text
+
+
+def clean_chunk(chunk: str) -> str:
+    """Remove non-Arabic characters from a streaming chunk WITHOUT stripping whitespace.
+    
+    IMPORTANT: Do NOT call .strip() here — each chunk may end with a space
+    that separates it from the next word. Stripping removes that space and
+    fuses words together (e.g. 'وصل ' + 'البطل' → 'وصلالبطل').
+    """
+    cleaned = re.sub(
+        r'[\u2E80-\u9FFF\uAC00-\uD7AF\u3040-\u30FF\u31F0-\u31FF\uFF00-\uFFEF]',
+        '', chunk
+    )
+    # Only collapse consecutive spaces — preserve single spaces
+    cleaned = re.sub(r'  +', ' ', cleaned)
+    return cleaned  # NO strip()
 
 
 def _load_config():
@@ -82,6 +112,15 @@ def retrieve(query: str, top_k: int = 5) -> tuple:
 _NAME_ALIASES = {
     "المؤلف": ["عمرو عبد الحميد"],
     "الكاتب": ["عمرو عبد الحميد"],
+    "البطل": ["خالد", "خالد حسني"],
+    "الشخصية الرئيسية": ["خالد", "خالد حسني"],
+    "بطل القصة": ["خالد", "خالد حسني"],
+    "الجد": ["عبدو", "جد خالد"],
+    "حبيبته": ["منى"],
+    # How Khaled got to Ard Zikola — via the underground tunnel
+    "أرض زيكولا": ["السرداب", "خالد السرداب"],
+    "وصول": ["السرداب", "نزل السرداب"],
+    "كيف وصل": ["السرداب", "نزل السرداب خالد"],
 }
 
 def _expand_query(query: str) -> list:
@@ -117,7 +156,14 @@ def retrieve_multi(query: str, top_k: int = 5) -> tuple:
     return all_chunks[:top_k], retrieval_time
 
 
-CHARACTER_FACTS = ""
+CHARACTER_FACTS = """حقائق أساسية عن الكتاب (استخدمها فقط عند الحاجة):
+- عنوان الكتاب: أرض زيكولا
+- المؤلف: عمرو عبد الحميد
+- بطل القصة / الشخصية الرئيسية: خالد حسني
+- حبيبة خالد: منى
+- جد خالد: عبدو
+- نوع القصة: رواية مغامرات وفانتازيا عربية
+"""
 
 
 def build_rag_prompt(question: str, chunks: list, history: list = None) -> str:
@@ -127,18 +173,21 @@ def build_rag_prompt(question: str, chunks: list, history: list = None) -> str:
     hist_str = ""
     if history and len(history) > 0:
         hist_str = "سجل المحادثة السابقة (استخدمه لفهم السياق والضمائر في السؤال الحالي):\n"
-        for msg in history[-6:]:  # keep last 3 turns
+        for msg in history[-10:]:  # keep last 5 turns
             role = "المستخدم" if msg["role"] == "user" else "الذكاء الاصطناعي"
             hist_str += f"{role}: {msg['content']}\n"
         hist_str += "\n"
 
-    prompt = f"""أنت مساعد ذكي وخبير باللغة العربية الفصحى وقواعدها النحوية. مهمتك هي الإجابة على السؤال بدقة متناهية بناءً على السياق المتاح فقط.
-تعليمات صارمة:
-1. صغ الإجابة بعناية باللغة العربية الفصحى السليمة خالية من الأخطاء النحوية والإملائية.
-2. يمنع منعاً باتاً استخدام اللغة الصينية، أو الإنجليزية، أو أي حروف غير عربية.
-3. لا تخلق أو تخترع أي معلومات من خارج النص.
-4. إذا كان السياق لا يحتوي على إجابة، قل حصراً: "لا يوجد في النص".
-5. كن مختصراً ومباشراً.
+    prompt = f"""أنت مساعد ذكي متخصص في الإجابة عن أسئلة حول كتاب "أرض زيكولا" للكاتب عمرو عبد الحميد.
+
+تعليمات صارمة يجب اتباعها حرفياً:
+1. أجب فقط وحصرياً بناءً على السياق المقدم أدناه. لا تخترع أو تضف أي معلومة غير موجودة في السياق.
+2. إذا كان السياق لا يحتوي على إجابة واضحة، قل بالضبط: "لا يوجد في النص المتاح إجابة على هذا السؤال."
+3. أجب باللغة العربية الفصحى السليمة فقط.
+4. لا تستخدم أي لغة أخرى غير العربية إطلاقاً.
+5. كن دقيقاً في أسماء الشخصيات ولا تخلط بينها.
+6. إذا كان السؤال يحتوي على ضمائر أو إشارات (مثل "هو"، "هذا الرجل"، "معه"، "ماذا فعل")، استخدم سجل المحادثة أدناه لفهم المقصود بالضمير ثم أجب بناءً على السياق.
+
 {CHARACTER_FACTS}
 {hist_str}السياق المتاح من الكتاب:
 {context}
@@ -146,8 +195,44 @@ def build_rag_prompt(question: str, chunks: list, history: list = None) -> str:
 السؤال الحالي:
 {question}
 
-الإجابة باللغة العربية:"""
+الإجابة (بناءً على السياق وسجل المحادثة):"""
     return prompt
+
+
+def _build_followup_query(question: str, history: list) -> str:
+    """
+    Build a richer search query for follow-up questions by including context
+    from both the previous user question AND the assistant's answer.
+    """
+    if not history or len(history) < 2:
+        return question
+
+    # Only enhance short questions (likely follow-ups with pronouns)
+    if len(question.split()) >= 15:
+        return question
+
+    # Gather context from recent history
+    last_user_q = ""
+    last_assistant_a = ""
+
+    for msg in reversed(history):
+        if msg["role"] == "assistant" and not last_assistant_a:
+            # Take first 100 chars of assistant answer as context
+            last_assistant_a = msg["content"][:100]
+        elif msg["role"] == "user" and not last_user_q:
+            last_user_q = msg["content"]
+        if last_user_q and last_assistant_a:
+            break
+
+    # Combine: previous question + key part of answer + current question
+    parts = []
+    if last_user_q:
+        parts.append(last_user_q)
+    if last_assistant_a:
+        parts.append(last_assistant_a)
+    parts.append(question)
+
+    return " ".join(parts)
 
 
 def ask(question: str, model: str = None, top_k: int = 2, history: list = None) -> dict:
@@ -160,19 +245,19 @@ def ask(question: str, model: str = None, top_k: int = 2, history: list = None) 
         cfg = _load_config()
         model = cfg.get("chosen_model") or cfg["models"][0]
 
-    # Retrieve: always prepend recent history topic to query to improve context recall
-    search_query = question
-    if history and len(history) >= 2 and len(question.split()) < 12:
-        # Combine with the previous user question for richer semantic search
-        search_query = f"{history[-2]['content']} {question}"
+    # Build enriched search query for follow-ups
+    search_query = _build_followup_query(question, history)
+    
+    # Use more chunks for follow-up questions (short questions = likely follow-ups)
+    effective_top_k = top_k + 1 if history and len(question.split()) < 10 else top_k
         
-    chunks, retrieval_time = retrieve_multi(search_query, top_k=top_k)
+    chunks, retrieval_time = retrieve_multi(search_query, top_k=effective_top_k)
     chunk_ids = [c["chunk_id"] for c in chunks]
 
     # Build prompt and generate
     rag_prompt = build_rag_prompt(question, chunks, history)
     start = time.time()
-    result = generate(model, rag_prompt, temperature=0.1, max_tokens=150)
+    result = generate(model, rag_prompt, system=SYSTEM_PROMPT, temperature=0.2, max_tokens=512)
     generation_time = round(time.time() - start, 3)
 
     return {
@@ -191,21 +276,22 @@ def ask_stream(question: str, model: str = None, top_k: int = 2, history: list =
         cfg = _load_config()
         model = cfg.get("chosen_model") or cfg["models"][0]
 
-    # Retrieve: always prepend recent history topic to query to improve context recall
-    search_query = question
-    if history and len(history) >= 2 and len(question.split()) < 12:
-        search_query = f"{history[-2]['content']} {question}"
+    # Build enriched search query for follow-ups
+    search_query = _build_followup_query(question, history)
+    
+    # Use more chunks for follow-up questions (short questions = likely follow-ups)
+    effective_top_k = top_k + 1 if history and len(question.split()) < 10 else top_k
         
-    chunks, retrieval_time = retrieve_multi(search_query, top_k=top_k)
+    chunks, retrieval_time = retrieve_multi(search_query, top_k=effective_top_k)
     chunk_ids = [c["chunk_id"] for c in chunks]
 
     # Build prompt and generate stream
     rag_prompt = build_rag_prompt(question, chunks, history)
     
     start = time.time()
-    stream = generate_stream(model, rag_prompt, temperature=0.1, max_tokens=150)
+    raw_stream = generate_stream(model, rag_prompt, system=SYSTEM_PROMPT, temperature=0.2, max_tokens=512)
     
-    return stream, chunk_ids, retrieval_time, start
+    return raw_stream, chunk_ids, retrieval_time, start
 
 
 def ask_llm_only(question: str, model: str = None) -> dict:

@@ -14,3 +14,4 @@ embeddings.position_ids | UNEXPECTED |  |
 
 [3mNotes:
 - UNEXPECTED[3m	:can be ignored when loading from different task/architecture; not ok if you expect identical arch.[0m
+  Stopping...
