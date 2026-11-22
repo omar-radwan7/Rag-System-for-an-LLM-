@@ -104,6 +104,13 @@ def retrieve(query: str, top_k: int = 5, dynamic_index: dict = None) -> tuple:
         scores = dict(zip(candidates, (float(x) for x in rerank_scores)))
         ranked = sorted(candidates, key=scores.get, reverse=True)
 
+    # Small documents fit in the prompt completely: send all chunks in document
+    # order, so questions about the whole document see all of it
+    if dynamic_index.get("text_chars", 1e9) <= _load_config().get("full_context_chars", 4000):
+        ranked = sorted(range(len(metadata)), key=lambda i: metadata[i]["chunk_id"])
+        top_k = len(ranked)
+        scores = {i: scores.get(i, 0.0) for i in ranked}
+
     chunks = []
     for i in ranked[:top_k]:
         chunk = metadata[i].copy()
@@ -135,7 +142,7 @@ def _search_query(question: str, history: list) -> str:
 
 
 def build_rag_prompt(question: str, chunks: list, history: list = None,
-                     doc_names: str = None) -> str:
+                     doc_names: str = None, outline: str = None) -> str:
     """Strict prompt: answer only from the passages, otherwise say it is not there."""
     passages = []
     for n, c in enumerate(chunks, 1):
@@ -153,6 +160,8 @@ def build_rag_prompt(question: str, chunks: list, history: list = None,
         hist_str += "\n"
 
     docs = f" from {doc_names}" if doc_names else ""
+    outline_str = (f"Outline of the whole document (its headings, use it for questions "
+                   f"about what the document covers):\n{outline}\n\n") if outline else ""
     lang = _language_hint(question)
 
     return f"""Answer the question using ONLY the document passages{docs} below.
@@ -161,9 +170,10 @@ Rules:
 1. Use only facts that are written in the passages. Do not add anything from your own knowledge.
 2. If the passages do not contain the answer, reply only with this sentence (in {lang}): "The provided documents do not contain this information."
 3. Copy numbers, dates and names exactly as they are written in the passages.
-4. Keep the answer short and direct.
+4. For questions about the document as a whole (what it is about, what it covers, a summary), use the outline and the passages and mention all main topics.
+5. Keep the answer short and direct.
 
-{hist_str}Document passages:
+{outline_str}{hist_str}Document passages:
 {context}
 
 Question:
@@ -223,7 +233,8 @@ def ask(question: str, model: str = None, top_k: int = 5, history: list = None,
 
     model = _resolve_model(model)
     chunks, retrieval_time = retrieve(_search_query(question, history), top_k, dynamic_index)
-    prompt = build_rag_prompt(question, chunks, history, doc_names)
+    prompt = build_rag_prompt(question, chunks, history, doc_names,
+                              (dynamic_index or {}).get("outline"))
     system = f"{SYSTEM_PROMPT} Answer in {_language_hint(question)}."
 
     start = time.time()
@@ -246,7 +257,8 @@ def ask_stream(question: str, model: str = None, top_k: int = 5, history: list =
 
     model = _resolve_model(model)
     chunks, retrieval_time = retrieve(_search_query(question, history), top_k, dynamic_index)
-    prompt = build_rag_prompt(question, chunks, history, doc_names)
+    prompt = build_rag_prompt(question, chunks, history, doc_names,
+                              (dynamic_index or {}).get("outline"))
     system = f"{SYSTEM_PROMPT} Answer in {_language_hint(question)}."
 
     start = time.time()

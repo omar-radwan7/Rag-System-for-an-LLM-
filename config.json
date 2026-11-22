@@ -10,5 +10,6 @@
   "chunk_size_chars": 500,
   "chunk_overlap_chars": 150,
   "top_k_retrieval": 5,
-  "allow_model_downloads": true
+  "allow_model_downloads": true,
+  "full_context_chars": 4000
 }

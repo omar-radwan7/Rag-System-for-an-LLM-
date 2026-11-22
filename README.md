@@ -32,7 +32,7 @@ This is the system from my bachelor thesis, *Development of a Multilingual RAG S
 3. **Chunk.** A sliding window splits the text into chunks of 500 characters with 150 characters of overlap, so a sentence cut at a border is still complete in the neighbouring chunk.
 4. **Embed and index.** A multilingual embedding model (BAAI/bge-m3) turns every chunk into a vector, stored in a FAISS IndexFlatIP index (cosine similarity on normalized vectors).
 5. **Retrieve.** The question is embedded with the same model. Vector search and BM25 keyword search each rank the chunks, and Reciprocal Rank Fusion combines both rankings. An optional cross-encoder reranker can reorder the best candidates.
-6. **Build the prompt.** The top chunks go into a strict prompt that allows only facts from the passages. Only the latest question and answer of the chat are included (rolling window), which keeps the prompt short.
+6. **Build the prompt.** The top chunks go into a strict prompt that allows only facts from the passages. The prompt also contains an outline of the whole document (its headings, found at upload), so questions like "what does this document cover?" are answered from all topics, not only from the closest passages. Documents short enough to fit in the prompt are sent completely. Only the latest question and answer of the chat are included (rolling window), which keeps the prompt short.
 7. **Generate.** A local 4-bit model answers through Ollama on the CPU, streamed word by word.
 8. **Check the language.** If a small model answers in the language of the passages instead of the question, the answer is translated into the question's language by the same local model.
 
@@ -93,6 +93,7 @@ All settings are in `config.json`:
 | `reranker_model` | Optional cross-encoder, for example `BAAI/bge-reranker-v2-m3`. Off by default because it adds about 2.5 GB of RAM and several seconds per question |
 | `chunk_size_chars`, `chunk_overlap_chars` | Sliding window size and overlap |
 | `top_k_retrieval` | Default number of passages per answer |
+| `full_context_chars` | Documents up to this many characters are sent to the model completely instead of only the top passages |
 
 ## Evaluate on your own documents
 

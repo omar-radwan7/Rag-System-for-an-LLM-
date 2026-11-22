@@ -54,6 +54,26 @@ def normalize_text(text: str) -> str:
     return text.strip()
 
 
+def find_headings(raw: str) -> list:
+    """
+    Heading-like lines from raw page text: short (at most 8 words), no closing
+    punctuation, starting with a number or a capital letter (or a non-Latin
+    letter). Used to give the model a table of contents of the whole document.
+    """
+    headings = []
+    for line in raw.splitlines():
+        line = line.strip()
+        words = line.split()
+        if not (3 <= len(line) <= 70 and 1 <= len(words) <= 8):
+            continue
+        if line[-1] in ".,;:!?" or not re.search(r"[^\W\d_]", line):
+            continue
+        first = line[0]
+        if first.isdigit() or first.isupper() or (first.isalpha() and not first.islower() and not first.isupper()):
+            headings.append(line)
+    return headings
+
+
 def chunk_text(text: str, size: int = 500, overlap: int = 150) -> list:
     """
     Sliding window over characters: chunks of about `size` characters, each
@@ -93,15 +113,19 @@ def build_memory_index(files: list) -> dict:
     size = cfg.get("chunk_size_chars", 500)
     overlap = cfg.get("chunk_overlap_chars", 150)
 
-    metadata = []
+    metadata, outline = [], []
     for name, pdf_bytes in files:
+        headings = []
         for page, raw in extract_text_from_pdf(pdf_bytes):
+            headings.extend(h for h in find_headings(raw) if h not in headings)
             for piece in chunk_text(normalize_text(raw), size, overlap):
                 metadata.append({
                     "chunk_id": len(metadata),
                     "source": f"{name}, p. {page}",
                     "text": piece,
                 })
+        if headings:
+            outline.append(f"{name}: " + " | ".join(headings[:60]))
 
     if not metadata:
         raise ValueError("No text could be extracted. The PDF may be a scanned image.")
@@ -120,5 +144,7 @@ def build_memory_index(files: list) -> dict:
         "index": index,
         "metadata": metadata,
         "chunk_count": len(metadata),
+        "outline": "\n".join(outline),
+        "text_chars": sum(len(c["text"]) for c in metadata),
         "doc_names": ", ".join(name for name, _ in files),
     }
