@@ -1,0 +1,39 @@
+# One command start on any machine with Docker:   docker compose up
+# Then open http://localhost:8501
+services:
+  ollama:
+    image: ollama/ollama:0.40.13
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      retries: 30
+
+  # Downloads the default model once, then exits
+  model:
+    image: ollama/ollama:0.40.13
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "gemma2:2b"]
+
+  app:
+    build: .
+    depends_on:
+      model:
+        condition: service_completed_successfully
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODELS: /ollama/models   # for the free disk check in "Get more models"
+    volumes:
+      - huggingface:/cache/huggingface
+      - ollama:/ollama:ro
+    ports:
+      - "8501:8501"
+
+volumes:
+  ollama:
+  huggingface:

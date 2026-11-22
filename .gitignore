@@ -6,3 +6,4 @@ venv/
 ui/chat_storage.json
 *.log
 results/
+.venv/

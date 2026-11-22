@@ -3,11 +3,13 @@ Ollama API client — lightweight wrapper around the Ollama REST API.
 No external SDK needed; uses `requests` only.
 """
 
+import os
 import requests
 import time
 import json
 
-OLLAMA_BASE = "http://localhost:11434"
+# Set OLLAMA_URL to use an Ollama server elsewhere (docker-compose sets http://ollama:11434)
+OLLAMA_BASE = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 
 def generate(model: str, prompt: str, system: str = "", temperature: float = 0.7,
              max_tokens: int = 150) -> dict:

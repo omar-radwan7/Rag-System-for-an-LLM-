@@ -56,30 +56,42 @@ From the thesis benchmarks on an Intel Core i7 laptop with 8 GB RAM and no GPU, 
 
 ## Getting started
 
-### Requirements
-
-- [Ollama](https://ollama.com) installed and running
-- Python 3.10 or newer
-- About 3 GB of disk space for the embedding model and 2 GB for the language model
-
-### Install
+Clone the repository, then start it with one command. Pick the option that fits your machine.
 
 ```bash
 git clone https://github.com/omar-radwan7/Rag-System-for-an-LLM-.git
 cd Rag-System-for-an-LLM-
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-ollama pull gemma2:2b
 ```
 
-### Run
+### Option 1: Docker (same setup on every machine)
+
+Needs only [Docker](https://docs.docker.com/get-docker/).
 
 ```bash
-streamlit run ui/app.py
+docker compose up
 ```
 
-Open the address Streamlit prints, upload a PDF in the sidebar and ask a question. The embedding model is downloaded once on first use. After that, everything works offline.
+This starts Ollama and the app in containers, downloads the default model once, and serves the app at http://localhost:8501. Models and the embedding model are kept in Docker volumes, so later starts are fast. Plan for about 9 GB of disk.
+
+### Option 2: run script (no Docker)
+
+Needs [Ollama](https://ollama.com/download) and Python 3.10 to 3.13.
+
+```bash
+./run.sh        # Linux and macOS
+run.bat         # Windows
+```
+
+On the first run the script creates a Python environment in `.venv`, installs the pinned package versions (on Linux the CPU build of PyTorch, which saves about 3 GB), starts Ollama if needed and downloads the default model. Then it opens the app at http://localhost:8501. Later runs start the app directly.
+
+Upload a PDF in the sidebar and ask a question. The embedding model (about 2.2 GB) is downloaded once on the first upload. After that, everything works offline.
+
+To use an Ollama server on another machine, set `OLLAMA_URL`, for example `OLLAMA_URL=http://192.168.1.20:11434 ./run.sh`. `PORT` changes the app's port.
+
+### Limits
+
+- Scanned PDFs (pages that are only images) have no text to extract and are not supported yet.
+- On a CPU, answers take about 5 to 30 seconds depending on the model and the answer length.
 
 ## Configuration
 
@@ -94,6 +106,15 @@ All settings are in `config.json`:
 | `chunk_size_chars`, `chunk_overlap_chars` | Sliding window size and overlap |
 | `top_k_retrieval` | Default number of passages per answer |
 | `full_context_chars` | Documents up to this many characters are sent to the model completely instead of only the top passages |
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The tests cover chunking, text cleanup, heading detection, language detection, BM25 and the model checks. They run in under a second and need no models.
 
 ## Evaluate on your own documents
 
@@ -120,6 +141,9 @@ ui/
   app.py             Streamlit interface
 eval/
   eval_runner.py     LLM only vs RAG on your documents
+tests/               Fast tests: python -m pytest
+run.sh, run.bat      One command setup and start
+Dockerfile, docker-compose.yml
 docs/
   example/           Fictional handbook used in the screenshots
 config.json
