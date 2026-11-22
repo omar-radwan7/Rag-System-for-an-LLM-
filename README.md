@@ -1,4 +1,4 @@
-# Offline AI Assistant for Company Documents
+# Offline AI assistant that answers employee questions from company PDFs, with sources, in any language. Bachelor thesis.
 
 **Employees ask questions about company PDFs and get answers with sources, in their own language. Everything runs on the company's own computers: no cloud, no API keys, and no document ever leaves the machine.**
 
