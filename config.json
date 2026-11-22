@@ -1,10 +1,14 @@
 {
-  "models": ["gemma2:2b", "qwen2.5:3b"],
+  "models": [
+    "gemma2:2b",
+    "qwen2.5:3b"
+  ],
   "chosen_model": "gemma2:2b",
   "embedding_model": "BAAI/bge-m3",
   "reranker_model": null,
   "rerank_candidates": 30,
   "chunk_size_chars": 500,
   "chunk_overlap_chars": 150,
-  "top_k_retrieval": 5
+  "top_k_retrieval": 5,
+  "allow_model_downloads": true
 }

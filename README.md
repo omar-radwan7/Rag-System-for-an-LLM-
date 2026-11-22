@@ -15,8 +15,13 @@ This is the system from my bachelor thesis, *Development of a Multilingual RAG S
 - **Answers only from your documents.** The prompt forbids the model from using its own knowledge. If the answer is not in the documents, it replies that the documents do not contain this information.
 - **Any language.** The question, the document and the answer do not have to share a language. A question in Arabic about an English PDF gets an Arabic answer.
 - **Shows its sources.** Every answer lists the passages it used, with file name and page, and you can open each one to read the exact text.
-- **Private by design.** Uploaded PDFs and their index live only in memory. Chats are not saved and disappear when the browser session ends.
+- **Private by design.** Uploaded PDFs and their index live only in memory. Chats are not saved and disappear when the browser session ends. Ollama cloud models are hidden from the model list, so documents are never sent to a server.
+- **Pick the right model for the job.** "Get more models" lists recommended local models with what each one is good for. It checks this computer's RAM and free disk and only offers models that will run, then downloads them with a progress bar. You can switch models at any time, even inside one chat, and every answer shows which model wrote it.
 - **Runs on modest hardware.** The default setup needs about 4.5 GB of RAM in total (measured on a CPU only laptop).
+
+![Get more models](docs/screenshots/model_picker.png)
+
+![Switching models inside one chat](docs/screenshots/model_switch.jpg)
 
 ## How it works
 
@@ -83,6 +88,7 @@ All settings are in `config.json`:
 | Key | Meaning |
 |---|---|
 | `chosen_model` | Default Ollama model (any installed model can also be picked in the sidebar) |
+| `allow_model_downloads` | Shows the "Get more models" button. Set it to `false` if IT should control which models are installed |
 | `embedding_model` | Sentence Transformers model for the vectors. `intfloat/multilingual-e5-small` is a lighter option |
 | `reranker_model` | Optional cross-encoder, for example `BAAI/bge-reranker-v2-m3`. Off by default because it adds about 2.5 GB of RAM and several seconds per question |
 | `chunk_size_chars`, `chunk_overlap_chars` | Sliding window size and overlap |
@@ -107,6 +113,7 @@ rag/
   keyword_search.py  BM25 and Reciprocal Rank Fusion
   arabic_fix.py      Repairs Arabic letters swapped by PDF extraction
   models.py          Embedding model prefixes (e5 vs others)
+  model_catalog.py   Recommended models, RAM and disk checks
   ollama_client.py   Local Ollama API
 ui/
   app.py             Streamlit interface

@@ -18,7 +18,8 @@ PROJECT_ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, PROJECT_ROOT)
 
 from rag.rag_pipeline import ask, ask_llm_only
-from rag.ollama_client import list_models
+from rag.ollama_client import list_models, pull_model
+from rag.model_catalog import CATALOG, check, total_ram_gb, free_disk_gb
 from rag.pdf_indexer import build_memory_index
 
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
@@ -289,6 +290,54 @@ def get_current_session_index():
             return i
     return 0
 
+# ─── Model picker ───
+@st.dialog("Get more models", width="large")
+def model_picker():
+    """List recommended models with what they are good for; download the ones this computer can run."""
+    try:
+        installed = set(list_models())
+    except Exception:
+        st.error("Ollama is not running. Start it and try again.")
+        return
+    ram, disk = total_ram_gb(), free_disk_gb()
+    st.caption(f"This computer: {ram:.0f} GB RAM, {disk:.1f} GB free disk. "
+               "Models run fully on this computer. Downloading needs internet once.")
+
+    for m in CATALOG:
+        status, note = check(m, installed, ram, disk)
+        with st.container(border=True):
+            left, right = st.columns([4, 1], vertical_alignment="center")
+            with left:
+                st.markdown(f"**{m['name']}** &nbsp; {m['size_gb']} GB download, "
+                            f"about {m['ram_gb']} GB RAM while answering")
+                st.caption(m["good_for"])
+                if status in ("ram", "disk"):
+                    st.caption(f":red[{note}]")
+            with right:
+                if status == "installed":
+                    if st.button("Use", key=f"use_{m['name']}", use_container_width=True):
+                        st.session_state["model_select"] = m["name"]
+                        st.rerun()
+                elif status == "ok":
+                    if st.button("Download", key=f"get_{m['name']}", type="primary",
+                                 use_container_width=True):
+                        bar = st.progress(0.0, text="Starting download...")
+                        try:
+                            for text, fraction in pull_model(m["name"]):
+                                if fraction is not None:
+                                    bar.progress(min(fraction, 1.0), text=f"{text} {fraction:.0%}")
+                                else:
+                                    bar.progress(0.0 if "pulling" in text else 1.0, text=text)
+                        except Exception as e:
+                            st.error(f"Download failed: {e}")
+                            return
+                        st.session_state["model_select"] = m["name"]
+                        st.rerun()
+                else:
+                    st.button("Too big" if status == "ram" else "No space",
+                              key=f"no_{m['name']}", disabled=True, use_container_width=True)
+
+
 # ─── Sidebar ───
 with st.sidebar:
     st.markdown("### Chats")
@@ -351,7 +400,12 @@ with st.sidebar:
     if not available:
         available = [chosen]
     default_idx = available.index(chosen) if chosen in available else 0
-    selected_model = st.selectbox("Model", available, index=default_idx)
+    if st.session_state.get("model_select") not in available:
+        st.session_state["model_select"] = available[default_idx]
+    selected_model = st.selectbox("Model", available, key="model_select")
+    if cfg.get("allow_model_downloads", True):
+        if st.button("+ Get more models", use_container_width=True):
+            model_picker()
 
     use_rag = st.toggle("Use RAG Sources", value=True)
     show_sources = st.toggle("Show Sources", value=True)
@@ -476,7 +530,7 @@ if user_input:
                     msg_container.markdown(f'<div dir="auto" class="chat-message bot-msg">{full_answer}</div>', unsafe_allow_html=True)
 
             gen_time = round(time.time() - start_time, 3)
-            latency_str = f"Retrieval: {ret_time}s | Generation: {gen_time}s"
+            latency_str = f"{selected_model} · Retrieval {ret_time}s · Generation {gen_time}s"
             answer = full_answer
         except Exception as e:
             answer = str(e)

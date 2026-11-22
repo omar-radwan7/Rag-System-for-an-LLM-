@@ -70,7 +70,32 @@ def generate_stream(model: str, prompt: str, system: str = "", temperature: floa
                 yield chunk.get("response", "")
 
 def list_models() -> list:
-    """Return the list of locally available model tags."""
+    """
+    Local model tags. Cloud models (Ollama "remote_host" models such as
+    "...:cloud") are left out, because they would send the documents to a server.
+    """
     resp = requests.get(f"{OLLAMA_BASE}/api/tags", timeout=10)
     resp.raise_for_status()
-    return [m["name"] for m in resp.json().get("models", [])]
+    return [
+        m["name"] for m in resp.json().get("models", [])
+        if not m.get("remote_host") and not m["name"].endswith("cloud")
+    ]
+
+
+def pull_model(name: str):
+    """
+    Download a model through Ollama. Yields (status_text, fraction_done or None).
+    Raises RuntimeError if Ollama reports an error.
+    """
+    with requests.post(f"{OLLAMA_BASE}/api/pull", json={"model": name, "stream": True},
+                       stream=True, timeout=3600) as resp:
+        resp.raise_for_status()
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            msg = json.loads(line)
+            if "error" in msg:
+                raise RuntimeError(msg["error"])
+            total, done = msg.get("total"), msg.get("completed")
+            fraction = done / total if total and done is not None else None
+            yield msg.get("status", ""), fraction
