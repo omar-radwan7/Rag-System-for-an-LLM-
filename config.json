@@ -3,7 +3,7 @@
     "gemma2:2b",
     "qwen2.5:3b"
   ],
-  "chosen_model": "gemma2:2b",
+  "chosen_model": "auto",
   "embedding_model": "BAAI/bge-m3",
   "reranker_model": null,
   "rerank_candidates": 30,

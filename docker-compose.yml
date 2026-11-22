@@ -1,4 +1,5 @@
 # One command start on any machine with Docker:   docker compose up
+# With an NVIDIA GPU:   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
 # Then open http://localhost:8501
 services:
   ollama:
@@ -10,17 +11,23 @@ services:
       interval: 5s
       retries: 30
 
-  # Downloads the default model once, then exits
+  # Checks RAM, GPU memory and free disk, downloads the best model that fits
+  # (or the one named in config.json), then exits
   model:
-    image: ollama/ollama:0.40.13
+    image: document-rag:local
+    build: .
     depends_on:
       ollama:
         condition: service_healthy
     environment:
-      OLLAMA_HOST: http://ollama:11434
-    entrypoint: ["ollama", "pull", "gemma2:2b"]
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODELS: /ollama/models
+    volumes:
+      - ollama:/ollama:ro
+    command: ["python", "-m", "rag.model_catalog", "--pull"]
 
   app:
+    image: document-rag:local
     build: .
     depends_on:
       model:

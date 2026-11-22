@@ -16,7 +16,7 @@ This is the system from my bachelor thesis, *Development of a Multilingual RAG S
 - **Any language.** The question, the document and the answer do not have to share a language. A question in Arabic about an English PDF gets an Arabic answer.
 - **Shows its sources.** Every answer lists the passages it used, with file name and page, and you can open each one to read the exact text.
 - **Private by design.** Uploaded PDFs and their index live only in memory. Chats are not saved and disappear when the browser session ends. Ollama cloud models are hidden from the model list, so documents are never sent to a server.
-- **Pick the right model for the job.** "Get more models" lists recommended local models with what each one is good for. It checks this computer's RAM and free disk and only offers models that will run, then downloads them with a progress bar. You can switch models at any time, even inside one chat, and every answer shows which model wrote it.
+- **Pick the right model for the job.** "Get more models" lists recommended local models with what each one is good for. It checks this computer's RAM, GPU memory and free disk and only offers models that will run, then downloads them with a progress bar. You can switch models at any time, even inside one chat, and every answer shows which model wrote it.
 - **Runs on modest hardware.** The default setup needs about 4.5 GB of RAM in total (measured on a CPU only laptop).
 
 ![Get more models](docs/screenshots/model_picker.png)
@@ -71,7 +71,13 @@ Needs only [Docker](https://docs.docker.com/get-docker/).
 docker compose up
 ```
 
-This starts Ollama and the app in containers, downloads the default model once, and serves the app at http://localhost:8501. Models and the embedding model are kept in Docker volumes, so later starts are fast. Plan for about 9 GB of disk.
+This starts Ollama and the app in containers, downloads the best model for the machine once (see below), and serves the app at http://localhost:8501. Models and the embedding model are kept in Docker volumes, so later starts are fast. Plan for about 9 GB of disk.
+
+With an NVIDIA GPU and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html), add the GPU file so the model runs on the GPU:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+```
 
 ### Option 2: run script (no Docker)
 
@@ -82,9 +88,24 @@ Needs [Ollama](https://ollama.com/download) and Python 3.10 to 3.13.
 run.bat         # Windows
 ```
 
-On the first run the script creates a Python environment in `.venv`, installs the pinned package versions (on Linux the CPU build of PyTorch, which saves about 3 GB), starts Ollama if needed and downloads the default model. Then it opens the app at http://localhost:8501. Later runs start the app directly.
+On the first run the script creates a Python environment in `.venv`, installs the pinned package versions (on Linux the CPU build of PyTorch, which saves about 3 GB), starts Ollama if needed and downloads the best model for the machine. Ollama uses an NVIDIA or Apple Silicon GPU on its own. Then it opens the app at http://localhost:8501. Later runs start the app directly.
 
 Upload a PDF in the sidebar and ask a question. The embedding model (about 2.2 GB) is downloaded once on the first upload. After that, everything works offline.
+
+### Which model a machine gets
+
+The first model depends on the hardware, so a strong machine does not start with the small model a weak laptop needs. Both setup options check RAM, NVIDIA GPU memory and free disk and download the best model that fits:
+
+| Machine | First model |
+|---|---|
+| Up to 6 GB RAM | qwen2.5:0.5b |
+| 6 to 10 GB RAM | gemma2:2b |
+| 10 GB RAM or more | qwen2.5:7b |
+| NVIDIA GPU with 6 GB or more | qwen2.5:7b, on the GPU |
+
+If the disk is too small for a model, the next smaller one is used. The app opens with the best installed model, and "Get more models" offers everything else the machine can run. To fix one model for everyone, for example when IT decides, set `chosen_model` in `config.json` to its name instead of `"auto"`. To see what a machine would get: `python -m rag.model_catalog --recommend`.
+
+The rules were tested with simulated hardware values (`--ram`, `--gpu`, `--disk`). Answer quality of the larger models was not measured, since the development laptop cannot run them at a usable speed.
 
 To use an Ollama server on another machine, set `OLLAMA_URL`, for example `OLLAMA_URL=http://192.168.1.20:11434 ./run.sh`. `PORT` changes the app's port.
 
@@ -99,7 +120,7 @@ All settings are in `config.json`:
 
 | Key | Meaning |
 |---|---|
-| `chosen_model` | Default Ollama model (any installed model can also be picked in the sidebar) |
+| `chosen_model` | `"auto"` picks the best model for the machine (see above). A model name fixes it for everyone. Any installed model can still be picked in the sidebar |
 | `allow_model_downloads` | Shows the "Get more models" button. Set it to `false` if IT should control which models are installed |
 | `embedding_model` | Sentence Transformers model for the vectors. `intfloat/multilingual-e5-small` is a lighter option |
 | `reranker_model` | Optional cross-encoder, for example `BAAI/bge-reranker-v2-m3`. Off by default because it adds about 2.5 GB of RAM and several seconds per question |
@@ -143,7 +164,7 @@ eval/
   eval_runner.py     LLM only vs RAG on your documents
 tests/               Fast tests: python -m pytest
 run.sh, run.bat      One command setup and start
-Dockerfile, docker-compose.yml
+Dockerfile, docker-compose.yml, docker-compose.gpu.yml
 docs/
   example/           Fictional handbook used in the screenshots
 config.json

@@ -222,8 +222,12 @@ def _language_hint(question: str) -> str:
 def _resolve_model(model: str = None) -> str:
     if model:
         return model
-    cfg = _load_config()
-    return cfg.get("chosen_model") or cfg["models"][0]
+    chosen = _load_config().get("chosen_model")
+    if chosen and chosen != "auto":
+        return chosen
+    from rag.model_catalog import best_installed
+    from rag.ollama_client import list_models
+    return best_installed(list_models())
 
 
 def ask(question: str, model: str = None, top_k: int = 5, history: list = None,

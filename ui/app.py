@@ -20,7 +20,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from rag.rag_pipeline import ask, ask_llm_only
 from rag.ollama_client import list_models, pull_model
-from rag.model_catalog import CATALOG, check, total_ram_gb, free_disk_gb
+from rag.model_catalog import CATALOG, check, total_ram_gb, free_disk_gb, gpu_memory_gb, best_installed
 from rag.pdf_indexer import build_memory_index
 
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
@@ -300,7 +300,9 @@ def model_picker():
         st.error("Ollama is not running. Start it and try again.")
         return
     ram, disk = total_ram_gb(), free_disk_gb()
-    st.caption(f"This computer: {ram:.0f} GB RAM, {disk:.1f} GB free disk. "
+    gpu = gpu_memory_gb()
+    gpu_text = f", {gpu:.0f} GB GPU memory" if gpu else ""
+    st.caption(f"This computer: {ram:.0f} GB RAM{gpu_text}, {disk:.1f} GB free disk. "
                "Models run fully on this computer. Downloading needs internet once.")
 
     for m in CATALOG:
@@ -401,7 +403,10 @@ with st.sidebar:
     except Exception:
         available = cfg.get("models", [])
 
-    chosen = cfg.get("chosen_model") or (available[0] if available else "qwen2.5:3b")
+    chosen = cfg.get("chosen_model")
+    if not chosen or chosen == "auto":
+        # Best installed model this machine can run (config.json can name a fixed one)
+        chosen = best_installed(available)
 
     # Model selector: dropdown only, no text input
     if not available:

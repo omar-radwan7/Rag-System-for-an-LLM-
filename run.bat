@@ -41,10 +41,11 @@ if errorlevel 1 (
     timeout /t 5 /nobreak >nul
 )
 
-for /f "delims=" %%m in ('%VENV_PY% -c "import json; print(json.load(open('config.json'))['chosen_model'])"') do set "MODEL=%%m"
+rem Best model this machine can run (RAM, NVIDIA GPU, free disk), unless config.json names one
+for /f "delims=" %%m in ('%VENV_PY% -m rag.model_catalog --recommend') do set "MODEL=%%m"
 curl -sf %OLLAMA_URL%/api/tags | findstr /c:"\"%MODEL%\"" >nul
 if errorlevel 1 (
-    echo ==^> Downloading the default model %MODEL% ^(first run only^)
+    echo ==^> Downloading %MODEL%, the best model for this machine ^(first run only^)
     ollama pull %MODEL% || exit /b 1
 )
 

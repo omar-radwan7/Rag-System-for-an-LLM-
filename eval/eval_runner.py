@@ -84,7 +84,8 @@ def auto_eval_score(expected: str, actual: str) -> dict:
 
 def run_evaluation(pdf_paths, gold_path=GOLD_PATH):
     cfg = load_config()
-    model = cfg.get("chosen_model") or cfg["models"][0]
+    from rag.rag_pipeline import _resolve_model
+    model = _resolve_model()
     gold = load_gold(gold_path)
     doc_index = build_memory_index([(os.path.basename(p), open(p, "rb").read()) for p in pdf_paths])
     os.makedirs(RESULTS_DIR, exist_ok=True)

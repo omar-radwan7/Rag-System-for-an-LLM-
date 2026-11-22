@@ -4,7 +4,7 @@
 # 1. Creates a Python environment in .venv (first run only)
 # 2. Installs the pinned packages (CPU build of torch on Linux)
 # 3. Checks that Ollama is installed and running, starts it if needed
-# 4. Downloads the default model from config.json if it is missing
+# 4. Downloads the best model this machine can run, if it is missing
 # 5. Starts the app in the browser
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -53,9 +53,11 @@ if ! curl -sf "$OLLAMA_URL/api/tags" >/dev/null 2>&1; then
     curl -sf "$OLLAMA_URL/api/tags" >/dev/null 2>&1 || fail "Ollama did not start. Start it yourself with: ollama serve"
 fi
 
-MODEL="$("$VENV_PY" -c 'import json; print(json.load(open("config.json"))["chosen_model"])')"
+# chosen_model "auto" in config.json: the best model this machine can run
+# (RAM, NVIDIA GPU memory, free disk). A fixed name in config.json is used as is.
+MODEL="$("$VENV_PY" -m rag.model_catalog --recommend)"
 if ! curl -sf "$OLLAMA_URL/api/tags" | grep -q "\"$MODEL\""; then
-    say "Downloading the default model $MODEL (first run only)"
+    say "Downloading $MODEL, the best model for this machine (first run only)"
     curl -sf "$OLLAMA_URL/api/pull" -d "{\"model\": \"$MODEL\", \"stream\": false}" >/dev/null ||
         fail "Could not download $MODEL. Check your internet connection."
 fi
