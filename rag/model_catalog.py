@@ -31,7 +31,7 @@ CATALOG = [
     },
     {
         "name": "gemma2:2b", "size_gb": 1.6, "ram_gb": 2.1,
-        "good_for": "Recommended default. Fast on a normal laptop and follows the language of the question well.",
+        "good_for": "Best choice for a normal 8 GB laptop. Fast and follows the language of the question well.",
     },
     {
         "name": "qwen2.5:3b", "size_gb": 1.9, "ram_gb": 3.2,     # thesis: 3.22 GB
@@ -43,7 +43,7 @@ CATALOG = [
     },
     {
         "name": "qwen2.5:7b", "size_gb": 4.7, "ram_gb": 5.5,
-        "good_for": "Better at longer documents, reasoning and many languages. Needs a 16 GB machine.",
+        "good_for": "Better at longer documents, reasoning and many languages. Needs about 10 GB RAM or a 6 GB GPU.",
     },
     {
         "name": "llama3:8b", "size_gb": 4.7, "ram_gb": 6.9,      # thesis: 6.85 GB
