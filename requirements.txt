@@ -1,6 +1,10 @@
-streamlit
-numpy
-faiss-cpu
-sentence-transformers
-pypdf
-requests
+# Tested with Python 3.10 to 3.13. On Linux, run.sh and the Dockerfile install
+# the CPU build of torch first, so the large CUDA packages are not downloaded.
+streamlit==1.57.0
+numpy==2.4.4
+faiss-cpu==1.13.2
+torch==2.11.0
+transformers==5.7.0
+sentence-transformers==5.4.1
+pypdf==6.10.2
+requests==2.33.1

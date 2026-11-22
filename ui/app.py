@@ -5,6 +5,7 @@ Chats live only in the browser session and are gone when it closes.
 Run: streamlit run project/ui/app.py
 """
 
+import html
 import streamlit as st
 import sys
 import os
@@ -58,10 +59,9 @@ st.set_page_config(
 # ─── Custom CSS ───
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;700&display=swap');
 
 html, body, [class*="st-"] {
-    font-family: 'Noto Naskh Arabic', serif;
+    font-family: 'Noto Naskh Arabic', 'Noto Sans Arabic', 'Segoe UI', 'Tahoma', system-ui, sans-serif;
 }
 /* Ensure Streamlit Icons (which use text ligatures) retain their icon font */
 .material-symbols-rounded, 
@@ -338,12 +338,16 @@ def model_picker():
                               key=f"no_{m['name']}", disabled=True, use_container_width=True)
 
 
+# While an answer is being written, all controls are disabled: in Streamlit any
+# click re-runs the script, which would cancel the answer.
+busy = st.session_state.get("pending") is not None
+
 # ─── Sidebar ───
 with st.sidebar:
     st.markdown("### Chats")
 
     # New Chat button — styled
-    if st.button("+ New Chat", use_container_width=True, key="new_chat_btn", type="primary"):
+    if st.button("+ New Chat", use_container_width=True, key="new_chat_btn", type="primary", disabled=busy):
         # Prevent spamming new empty chats
         if st.session_state.chat_sessions[0]["messages"]:
             new_sess = create_new_session()
@@ -367,12 +371,15 @@ with st.sidebar:
         col1, col2 = st.columns([7, 1])
 
         with col1:
-            if st.button(title, key=f"sel_{sid}", use_container_width=True):
+            if st.button(title, key=f"sel_{sid}", use_container_width=True, disabled=busy):
                 st.session_state.current_session = sid
+                if session.get("model"):
+                    # Reopen the chat with the model it last used
+                    st.session_state["model_select"] = session["model"]
                 st.rerun()
 
         with col2:
-            if st.button("🗑", key=f"del_{sid}", help="Delete Chat", use_container_width=True):
+            if st.button("🗑", key=f"del_{sid}", help="Delete Chat", use_container_width=True, disabled=busy):
                 st.session_state.chat_sessions = [
                     s for s in st.session_state.chat_sessions if s["id"] != sid
                 ]
@@ -402,14 +409,14 @@ with st.sidebar:
     default_idx = available.index(chosen) if chosen in available else 0
     if st.session_state.get("model_select") not in available:
         st.session_state["model_select"] = available[default_idx]
-    selected_model = st.selectbox("Model", available, key="model_select")
+    selected_model = st.selectbox("Model", available, key="model_select", disabled=busy)
     if cfg.get("allow_model_downloads", True):
-        if st.button("+ Get more models", use_container_width=True):
+        if st.button("+ Get more models", use_container_width=True, disabled=busy):
             model_picker()
 
-    use_rag = st.toggle("Use RAG Sources", value=True)
-    show_sources = st.toggle("Show Sources", value=True)
-    top_k = st.slider("Number of Sources", 1, 8, cfg.get("top_k_retrieval", 5))
+    use_rag = st.toggle("Use RAG Sources", value=True, disabled=busy)
+    show_sources = st.toggle("Show Sources", value=True, disabled=busy)
+    top_k = st.slider("Number of Sources", 1, 8, cfg.get("top_k_retrieval", 5), disabled=busy)
 
     # ─── PDF Upload ───
     st.markdown("---")
@@ -421,6 +428,7 @@ with st.sidebar:
         accept_multiple_files=True,
         help="Any PDFs, in any language. They stay in memory and are never saved.",
         key="pdf_uploader",
+        disabled=busy,
     )
 
     names = tuple(sorted(f.name for f in uploaded)) if uploaded else ()
@@ -467,36 +475,51 @@ if not current_messages:
     </div>
     """, unsafe_allow_html=True)
 
-for msg in current_messages:
+def bubble(text: str, kind: str):
+    """Chat bubble; text is escaped so HTML in questions or documents is shown, not run."""
+    st.markdown(f'<div dir="auto" class="chat-message {kind}-msg">{html.escape(text)}</div>',
+                unsafe_allow_html=True)
+
+
+pending = st.session_state.get("pending")
+for n, msg in enumerate(current_messages):
     if msg["role"] == "user":
-        st.markdown(f'<div dir="auto" class="chat-message user-msg">{msg["content"]}</div>',
-                    unsafe_allow_html=True)
+        bubble(msg["content"], "user")
+        answered = n + 1 < len(current_messages) and current_messages[n + 1]["role"] == "assistant"
+        waiting = pending and n == len(current_messages) - 1
+        if not answered and not waiting:
+            st.caption("Stopped before an answer was written. Ask again to get one.")
     else:
-        st.markdown(f'<div dir="auto" class="chat-message bot-msg">{msg["content"]}</div>',
-                    unsafe_allow_html=True)
+        bubble(msg["content"], "bot")
         if show_sources and msg.get("sources"):
             render_sources(msg["sources"])
         if msg.get("latency"):
-            st.markdown(f'<span class="latency-badge">{msg["latency"]}</span>',
+            st.markdown(f'<span class="latency-badge">{html.escape(msg["latency"])}</span>',
                         unsafe_allow_html=True)
 
 # ─── Chat Input ───
-user_input = st.chat_input("Ask me anything...")
+user_input = st.chat_input("Ask me anything...", disabled=busy)
 
 if user_input:
-    current_idx = get_current_session_index()
-    curr_session = st.session_state.chat_sessions[current_idx]
-    
+    curr_session = st.session_state.chat_sessions[get_current_session_index()]
     if not curr_session["messages"] or curr_session["title"] == "New Chat":
         curr_session["title"] = user_input[:25] + ("..." if len(user_input) > 25 else "")
-    
     curr_session["messages"].append({"role": "user", "content": user_input})
-    save_chat_sessions(st.session_state.chat_sessions)
-    
-    st.markdown(f'<div dir="auto" class="chat-message user-msg">{user_input}</div>',
-                unsafe_allow_html=True)
+    # Re-run once with all controls disabled, then write the answer below
+    st.session_state["pending"] = {"session": curr_session["id"], "question": user_input}
+    st.rerun()
+
+if pending:
+    # Taken out right away: if the run is stopped, the controls come back
+    st.session_state.pop("pending", None)
+    curr_session = next((s for s in st.session_state.chat_sessions if s["id"] == pending["session"]), None)
+    question = pending["question"]
+    if curr_session is None:
+        st.rerun()
 
     with st.spinner("Thinking..."):
+        sources, latency_str = [], ""
+        msg_container = st.empty()
         try:
             chat_history = curr_session["messages"][:-1]
             d_index = st.session_state.get("doc_index")
@@ -505,7 +528,7 @@ if user_input:
             if use_rag:
                 from rag.rag_pipeline import ask_stream
                 stream, chunks, ret_time, start_time = ask_stream(
-                    user_input, model=selected_model, top_k=top_k,
+                    question, model=selected_model, top_k=top_k,
                     history=chat_history,
                     dynamic_index=d_index,
                     doc_names=d_index["doc_names"],
@@ -514,20 +537,17 @@ if user_input:
                             "text": c["text"]} for c in chunks]
             else:
                 from rag.rag_pipeline import ask_llm_only_stream
-                stream, sources, ret_time, start_time = ask_llm_only_stream(user_input, model=selected_model)
+                stream, sources, ret_time, start_time = ask_llm_only_stream(question, model=selected_model)
 
-            msg_container = st.empty()
             full_answer = ""
             for chunk in stream:
                 full_answer += chunk
-                msg_container.markdown(f'<div dir="auto" class="chat-message bot-msg">{full_answer}</div>', unsafe_allow_html=True)
+                with msg_container:
+                    bubble(full_answer, "bot")
 
             if use_rag:
                 from rag.rag_pipeline import ensure_language
-                fixed = ensure_language(full_answer, user_input, selected_model)
-                if fixed != full_answer:
-                    full_answer = fixed
-                    msg_container.markdown(f'<div dir="auto" class="chat-message bot-msg">{full_answer}</div>', unsafe_allow_html=True)
+                full_answer = ensure_language(full_answer, question, selected_model)
 
             gen_time = round(time.time() - start_time, 3)
             latency_str = f"{selected_model} · Retrieval {ret_time}s · Generation {gen_time}s"
@@ -535,22 +555,13 @@ if user_input:
         except Exception as e:
             answer = str(e)
             sources = []
-            latency_str = ""
-            msg_container = st.empty()
-            msg_container.markdown(f'<div dir="auto" class="chat-message bot-msg">{answer}</div>', unsafe_allow_html=True)
 
-    bot_msg = {
+    curr_session["messages"].append({
         "role": "assistant",
         "content": answer,
         "sources": sources,
         "latency": latency_str,
-    }
-    
-    curr_session["messages"].append(bot_msg)
-    save_chat_sessions(st.session_state.chat_sessions)
-
-    if show_sources and sources:
-        render_sources(sources)
-    if latency_str:
-        st.markdown(f'<span class="latency-badge">{latency_str}</span>',
-                    unsafe_allow_html=True)
+        "model": selected_model,
+    })
+    curr_session["model"] = selected_model
+    st.rerun()
