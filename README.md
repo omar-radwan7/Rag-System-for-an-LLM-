@@ -6,13 +6,9 @@ This project is a Retrieval-Augmented Generation (RAG) system designed to transf
 
 Developed as part of a research and development initiative at the Applied Innovation Center (AIC), the system addresses the need for organizations to interact with sensitive internal data without uploading it to external servers. This project serves as the foundation for a bachelor's thesis focused on privacy-preserving, locally deployed RAG architectures.
 
-## Screenshots
+## Pipeline
 
-| Chat interface | End-to-end pipeline |
-|---|---|
-| ![Chat interface](docs/screenshots/app.png) | ![Pipeline](docs/screenshots/pipeline.png) |
-
-A short slide overview of the project is in [docs/RAG_Thesis_Slides.pdf](docs/RAG_Thesis_Slides.pdf).
+![Pipeline](docs/screenshots/pipeline.png)
 
 ## Results
 
