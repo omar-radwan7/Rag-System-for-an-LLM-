@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-eval_runner.py — Compare LLM-only vs RAG on the gold questions.
-Generates eval_results.csv and contributes to final_report.md.
+eval_runner.py — Compare LLM-only vs RAG on your own documents.
+
+Usage:
+    python eval/eval_runner.py my_docs.pdf [more.pdf ...] --gold my_questions.json
+
+The gold file is a list of {"question_id", "question", "expected_answer_short"}.
+See eval/gold_questions.example.json. Results go to results/eval_results.csv.
 """
 
 import json
@@ -13,10 +18,11 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from rag.rag_pipeline import ask, ask_llm_only
+from rag.pdf_indexer import build_memory_index
 from rag.ollama_client import generate
 
 EVAL_DIR = os.path.dirname(__file__)
-GOLD_PATH = os.path.join(EVAL_DIR, "gold_questions.json")
+GOLD_PATH = os.path.join(EVAL_DIR, "gold_questions.example.json")
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "..", "results")
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config.json")
 
@@ -26,8 +32,8 @@ def load_config():
         return json.load(f)
 
 
-def load_gold():
-    with open(GOLD_PATH, "r", encoding="utf-8") as f:
+def load_gold(path=GOLD_PATH):
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -76,10 +82,11 @@ def auto_eval_score(expected: str, actual: str) -> dict:
     }
 
 
-def run_evaluation():
+def run_evaluation(pdf_paths, gold_path=GOLD_PATH):
     cfg = load_config()
     model = cfg.get("chosen_model") or cfg["models"][0]
-    gold = load_gold()
+    gold = load_gold(gold_path)
+    doc_index = build_memory_index([(os.path.basename(p), open(p, "rb").read()) for p in pdf_paths])
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     csv_path = os.path.join(RESULTS_DIR, "eval_results.csv")
@@ -128,7 +135,8 @@ def run_evaluation():
         # ─── RAG ───
         print(f"  Q{qid} [RAG]...", end=" ", flush=True)
         try:
-            rag_result = ask(question, model=model, top_k=5)
+            rag_result = ask(question, model=model, top_k=5, dynamic_index=doc_index,
+                             doc_names=doc_index["doc_names"])
             rag_answer = rag_result["answer"]
             rag_latency = rag_result["retrieval_time"] + rag_result["generation_time"]
         except Exception as e:
@@ -176,7 +184,7 @@ def write_final_report(model, gold, llm_scores, rag_scores, rows):
     rag_avg_lat = round(sum(r["latency"] for r in rag_rows) / max(len(rag_rows), 1), 2)
 
     with open(report_path, "w", encoding="utf-8") as f:
-        f.write("# Final Evaluation Report — RAG System for Ard Zikola\n\n")
+        f.write("# Evaluation Report: LLM only vs RAG\n\n")
         f.write(f"**Date:** {time.strftime('%Y-%m-%d %H:%M')}\n\n")
         f.write(f"**Model Used:** `{model}`\n\n")
         f.write(f"**Number of Questions:** {len(gold)}\n\n")
@@ -185,7 +193,7 @@ def write_final_report(model, gold, llm_scores, rag_scores, rows):
 
         f.write("## 1. Survey Methodology\n\n")
         f.write("- Tested local models via Ollama (CPU mode only)\n")
-        f.write("- Evaluated reading comprehension and logical thinking over Ard Zikola text\n")
+        f.write("- Compared answers with and without the documents\n")
         f.write("- Evaluation: Automatic based on accuracy and faithfulness\n\n")
 
         f.write("## 2. Model Ranking\n\n")
@@ -243,7 +251,7 @@ def write_final_report(model, gold, llm_scores, rag_scores, rows):
         f.write("- Small embedding model — a larger model might improve retrieval.\n\n")
 
         f.write("## 8. Conclusion\n\n")
-        f.write(f"Successfully built a full RAG system for Ard Zikola using the `{model}` model locally. ")
+        f.write(f"Evaluated the RAG system locally with the `{model}` model. ")
         f.write("The system includes an interactive chat interface, semantic retrieval from text, and a comprehensive comparison between ")
         f.write("the model's performance alone and its performance with the RAG system.\n")
 
@@ -251,4 +259,9 @@ def write_final_report(model, gold, llm_scores, rag_scores, rows):
 
 
 if __name__ == "__main__":
-    run_evaluation()
+    import argparse
+    parser = argparse.ArgumentParser(description="LLM-only vs RAG on your documents")
+    parser.add_argument("pdfs", nargs="+", help="PDF documents to index")
+    parser.add_argument("--gold", default=GOLD_PATH, help="questions with expected answers (JSON)")
+    args = parser.parse_args()
+    run_evaluation(args.pdfs, args.gold)

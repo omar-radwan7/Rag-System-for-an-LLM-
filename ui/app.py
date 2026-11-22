@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Streamlit Chat UI for the Arabic RAG system.
+Streamlit chat UI: upload documents, ask questions, get answers grounded in them.
+Chats live only in the browser session and are gone when it closes.
 Run: streamlit run project/ui/app.py
 """
 
@@ -21,7 +22,6 @@ from rag.ollama_client import list_models
 from rag.pdf_indexer import build_memory_index
 
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
-CHAT_STORAGE_PATH = os.path.join(PROJECT_ROOT, "ui", "chat_storage.json")
 
 
 def load_config():
@@ -30,18 +30,12 @@ def load_config():
 
 
 def load_chat_sessions():
-    if os.path.exists(CHAT_STORAGE_PATH):
-        try:
-            with open(CHAT_STORAGE_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
+    # Privacy: nothing is stored on disk; chats exist only in this session
     return []
 
 
 def save_chat_sessions(sessions):
-    with open(CHAT_STORAGE_PATH, "w", encoding="utf-8") as f:
-        json.dump(sessions, f, ensure_ascii=False, indent=2)
+    pass
 
 
 def create_new_session():
@@ -55,7 +49,7 @@ def create_new_session():
 
 # ─── Page Config ───
 st.set_page_config(
-    page_title="AI Assistant",
+    page_title="Document Assistant",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -226,8 +220,7 @@ html, body, [class*="st-"] {
     padding: 1rem 1.5rem;
     border-radius: 12px;
     margin-bottom: 1rem;
-    direction: ltr;
-    text-align: left;
+    text-align: start;
     line-height: 1.8;
 }
 
@@ -243,8 +236,6 @@ html, body, [class*="st-"] {
 .bot-msg {
     background: transparent;
     color: #e0e0e0;
-    direction: ltr;
-    text-align: left;
     white-space: pre-wrap;
     word-break: break-word;
 }
@@ -364,58 +355,51 @@ with st.sidebar:
 
     use_rag = st.toggle("Use RAG Sources", value=True)
     show_sources = st.toggle("Show Sources", value=True)
-    top_k = st.slider("Number of Sources", 1, 5, 2)
+    top_k = st.slider("Number of Sources", 1, 8, cfg.get("top_k_retrieval", 5))
 
     # ─── PDF Upload ───
     st.markdown("---")
-    st.markdown("**📚 Book**")
+    st.markdown("**📄 Documents**")
 
-    uploaded_pdf = st.file_uploader(
-        "Upload a PDF book",
+    uploaded = st.file_uploader(
+        "Upload PDF documents",
         type=["pdf"],
-        help="Upload any PDF — the system will read it and answer your questions about it.",
+        accept_multiple_files=True,
+        help="Any PDFs, in any language. They stay in memory and are never saved.",
         key="pdf_uploader",
     )
 
-    # Process newly uploaded PDF
-    if uploaded_pdf is not None:
-        pdf_name = uploaded_pdf.name
-        prev_name = st.session_state.get("loaded_book_name")
+    names = tuple(sorted(f.name for f in uploaded)) if uploaded else ()
+    if names and names != st.session_state.get("loaded_docs"):
+        with st.spinner("Reading documents..."):
+            try:
+                doc_index = build_memory_index([(f.name, f.getvalue()) for f in uploaded])
+                st.session_state["doc_index"] = doc_index
+                st.session_state["loaded_docs"] = names
+            except Exception as e:
+                st.session_state.pop("doc_index", None)
+                st.session_state.pop("loaded_docs", None)
+                st.error(f"Could not read the PDF: {e}")
+    elif not names:
+        st.session_state.pop("doc_index", None)
+        st.session_state.pop("loaded_docs", None)
 
-        if pdf_name != prev_name:
-            # New book uploaded — build index
-            with st.spinner(f"📖 Reading '{pdf_name}'..."):
-                try:
-                    pdf_bytes = uploaded_pdf.read()
-                    book_index = build_memory_index(pdf_bytes)
-                    # book_index has keys: 'index', 'metadata', 'chunk_count', 'text_preview'
-                    st.session_state["book_index"] = book_index  # full dict passed to ask_stream
-                    st.session_state["loaded_book_name"] = pdf_name
-                    st.success(f"✅ '{pdf_name}' loaded — {book_index['chunk_count']} chunks")
-
-                    # If there's an active conversation, insert a system notice
-                    current_idx = get_current_session_index()
-                    curr_msgs = st.session_state.chat_sessions[current_idx]["messages"]
-                    if curr_msgs and prev_name:
-                        notice = f"📚 **Book switched to '{pdf_name}'**. Previous context from '{prev_name}' has been cleared. Ask your questions about the new book!"
-                        curr_msgs.append({"role": "assistant", "content": notice, "sources": [], "latency": ""})
-                        save_chat_sessions(st.session_state.chat_sessions)
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Could not process PDF: {e}")
+    if st.session_state.get("doc_index"):
+        n_docs = len(st.session_state["loaded_docs"])
+        st.success(f"{n_docs} document{'s' if n_docs > 1 else ''} loaded, "
+                   f"{st.session_state['doc_index']['chunk_count']} chunks")
     else:
-        # PDF was removed — clear index
-        if st.session_state.get("loaded_book_name"):
-            st.session_state.pop("dynamic_index", None)
-            st.session_state.pop("book_index", None)
-            st.session_state.pop("loaded_book_name", None)
+        st.caption("No documents yet. Upload a PDF to start.")
 
-    # Show currently loaded book
-    loaded = st.session_state.get("loaded_book_name")
-    if loaded:
-        st.caption(f"📖 Active: **{loaded}**")
-    else:
-        st.caption("📖 No book uploaded — using built-in dataset")
+
+def render_sources(sources):
+    """Show the exact passages the answer was grounded in."""
+    if not sources:
+        return
+    st.markdown("**Sources**")
+    for n, c in enumerate(sources, 1):
+        with st.expander(f"[{n}] {c.get('source', 'Chunk ' + str(c.get('chunk_id')))}"):
+            st.write(c.get("text", ""))
 
 
 # Display chat history
@@ -431,14 +415,13 @@ if not current_messages:
 
 for msg in current_messages:
     if msg["role"] == "user":
-        st.markdown(f'<div class="chat-message user-msg">{msg["content"]}</div>',
+        st.markdown(f'<div dir="auto" class="chat-message user-msg">{msg["content"]}</div>',
                     unsafe_allow_html=True)
     else:
-        st.markdown(f'<div class="chat-message bot-msg">{msg["content"]}</div>',
+        st.markdown(f'<div dir="auto" class="chat-message bot-msg">{msg["content"]}</div>',
                     unsafe_allow_html=True)
         if show_sources and msg.get("sources"):
-            chips = " ".join([f'<span class="source-chip">Chunk {s}</span>' for s in msg["sources"]])
-            st.markdown(f"Sources: {chips}", unsafe_allow_html=True)
+            render_sources(msg["sources"])
         if msg.get("latency"):
             st.markdown(f'<span class="latency-badge">{msg["latency"]}</span>',
                         unsafe_allow_html=True)
@@ -456,23 +439,25 @@ if user_input:
     curr_session["messages"].append({"role": "user", "content": user_input})
     save_chat_sessions(st.session_state.chat_sessions)
     
-    st.markdown(f'<div class="chat-message user-msg">{user_input}</div>',
+    st.markdown(f'<div dir="auto" class="chat-message user-msg">{user_input}</div>',
                 unsafe_allow_html=True)
 
     with st.spinner("Thinking..."):
         try:
             chat_history = curr_session["messages"][:-1]
-            # Get dynamic index if a PDF is loaded
-            d_index = st.session_state.get("book_index")
-            b_name = st.session_state.get("loaded_book_name")
+            d_index = st.session_state.get("doc_index")
+            if use_rag and not d_index:
+                raise ValueError("Upload a PDF in the sidebar first, or turn off Use RAG Sources.")
             if use_rag:
                 from rag.rag_pipeline import ask_stream
-                stream, sources, ret_time, start_time = ask_stream(
+                stream, chunks, ret_time, start_time = ask_stream(
                     user_input, model=selected_model, top_k=top_k,
                     history=chat_history,
                     dynamic_index=d_index,
-                    book_name=b_name,
+                    doc_names=d_index["doc_names"],
                 )
+                sources = [{"chunk_id": c["chunk_id"], "source": c.get("source", ""),
+                            "text": c["text"]} for c in chunks]
             else:
                 from rag.rag_pipeline import ask_llm_only_stream
                 stream, sources, ret_time, start_time = ask_llm_only_stream(user_input, model=selected_model)
@@ -481,17 +466,24 @@ if user_input:
             full_answer = ""
             for chunk in stream:
                 full_answer += chunk
-                msg_container.markdown(f'<div class="chat-message bot-msg">{full_answer}</div>', unsafe_allow_html=True)
+                msg_container.markdown(f'<div dir="auto" class="chat-message bot-msg">{full_answer}</div>', unsafe_allow_html=True)
+
+            if use_rag:
+                from rag.rag_pipeline import ensure_language
+                fixed = ensure_language(full_answer, user_input, selected_model)
+                if fixed != full_answer:
+                    full_answer = fixed
+                    msg_container.markdown(f'<div dir="auto" class="chat-message bot-msg">{full_answer}</div>', unsafe_allow_html=True)
 
             gen_time = round(time.time() - start_time, 3)
             latency_str = f"Retrieval: {ret_time}s | Generation: {gen_time}s"
             answer = full_answer
         except Exception as e:
-            answer = f"Error: {str(e)}"
+            answer = str(e)
             sources = []
             latency_str = ""
             msg_container = st.empty()
-            msg_container.markdown(f'<div class="chat-message bot-msg">{answer}</div>', unsafe_allow_html=True)
+            msg_container.markdown(f'<div dir="auto" class="chat-message bot-msg">{answer}</div>', unsafe_allow_html=True)
 
     bot_msg = {
         "role": "assistant",
@@ -504,8 +496,7 @@ if user_input:
     save_chat_sessions(st.session_state.chat_sessions)
 
     if show_sources and sources:
-        chips = " ".join([f'<span class="source-chip">Chunk {s}</span>' for s in sources])
-        st.markdown(f"Sources: {chips}", unsafe_allow_html=True)
+        render_sources(sources)
     if latency_str:
         st.markdown(f'<span class="latency-badge">{latency_str}</span>',
                     unsafe_allow_html=True)

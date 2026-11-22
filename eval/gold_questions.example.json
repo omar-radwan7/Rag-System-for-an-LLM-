@@ -1,0 +1,5 @@
+[
+  {"question_id": 1, "question": "How many vacation days do full-time employees get?", "expected_answer_short": "28 vacation days per year"},
+  {"question_id": 2, "question": "كم يوما يمكن العمل عن بعد في الأسبوع؟", "expected_answer_short": "حتى ثلاثة أيام في الأسبوع"},
+  {"question_id": 3, "question": "Wie hoch ist das jährliche Weiterbildungsbudget?", "expected_answer_short": "1.200 Euro pro Jahr"}
+]

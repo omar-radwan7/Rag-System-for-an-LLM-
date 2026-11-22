@@ -1,12 +1,10 @@
 {
-  "models": [
-    "qwen2.5:3b",
-    "llama3.2:3b",
-    "gemma2:2b"
-  ],
-  "chosen_model": "qwen2.5:3b",
-  "embedding_model": "intfloat/multilingual-e5-small",
-  "chunk_size_tokens": 500,
-  "chunk_overlap_tokens": 100,
-  "top_k_retrieval": 3
+  "models": ["gemma2:2b", "qwen2.5:3b"],
+  "chosen_model": "gemma2:2b",
+  "embedding_model": "BAAI/bge-m3",
+  "reranker_model": null,
+  "rerank_candidates": 30,
+  "chunk_size_chars": 500,
+  "chunk_overlap_chars": 150,
+  "top_k_retrieval": 5
 }

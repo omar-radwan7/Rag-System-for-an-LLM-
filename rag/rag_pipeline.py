@@ -1,56 +1,37 @@
 #!/usr/bin/env python3
 """
-rag_pipeline.py — Full RAG pipeline: embed query → retrieve from FAISS → prompt LLM.
+rag_pipeline.py — Retrieval and generation.
+
+Question -> hybrid search (vectors + BM25, optional reranker) -> strict prompt
+with the retrieved passages -> local model through Ollama.
+
+The model may only answer from the attached documents. If the passages do not
+contain the answer, it says so instead of using its own knowledge.
 """
 
 import json
 import os
-import re
 import sys
 import time
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from rag.models import DEFAULT_EMBEDDING_MODEL, query_text
+
 RAG_DIR = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config.json")
-FAISS_INDEX_PATH = os.path.join(RAG_DIR, "faiss.index")
-METADATA_PATH = os.path.join(RAG_DIR, "chunk_metadata.json")
 
 # Lazy-loaded globals
 _embed_model = None
-_faiss_index = None
-_metadata = None
+_bm25_cache = {}
+_reranker = None
 
-# System prompt to ensure the output matches the user's language
-SYSTEM_PROMPT = """You are a helpful, knowledgeable assistant. Reply in the SAME language as the user's question (Arabic → Arabic, English → English)."""
-
-
-def clean_arabic_text(text: str) -> str:
-    """Remove non-Arabic characters from full (non-streaming) model output."""
-    cleaned = re.sub(
-        r'[\u2E80-\u9FFF\uAC00-\uD7AF\u3040-\u30FF\u31F0-\u31FF\uFF00-\uFFEF]',
-        '', text
-    )
-    cleaned = re.sub(r'  +', ' ', cleaned)
-    return cleaned.strip()  # OK to strip for full text
-
-
-def clean_chunk(chunk: str) -> str:
-    """Remove non-Arabic characters from a streaming chunk WITHOUT stripping whitespace.
-    
-    IMPORTANT: Do NOT call .strip() here — each chunk may end with a space
-    that separates it from the next word. Stripping removes that space and
-    fuses words together (e.g. 'وصل ' + 'البطل' → 'وصلالبطل').
-    """
-    cleaned = re.sub(
-        r'[\u2E80-\u9FFF\uAC00-\uD7AF\u3040-\u30FF\u31F0-\u31FF\uFF00-\uFFEF]',
-        '', chunk
-    )
-    # Only collapse consecutive spaces — preserve single spaces
-    cleaned = re.sub(r'  +', ' ', cleaned)
-    return cleaned  # NO strip()
-
+SYSTEM_PROMPT = (
+    "You are a document assistant. You answer only from the document passages "
+    "you are given, never from your own knowledge. You always reply in the same "
+    "language as the user's question."
+)
 
 def _load_config():
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -61,275 +42,262 @@ def _get_embed_model():
     global _embed_model
     if _embed_model is None:
         from sentence_transformers import SentenceTransformer
-        cfg = _load_config()
-        model_name = cfg.get("embedding_model", "intfloat/multilingual-e5-small")
+        model_name = _load_config().get("embedding_model", DEFAULT_EMBEDDING_MODEL)
         _embed_model = SentenceTransformer(model_name)
+        _embed_model.rag_name = model_name
     return _embed_model
 
 
-def _get_faiss_index():
-    global _faiss_index
-    if _faiss_index is None:
-        import faiss
-        _faiss_index = faiss.read_index(FAISS_INDEX_PATH)
-    return _faiss_index
+def _get_reranker():
+    """Cross-encoder that rescores (question, passage) pairs; None if not configured."""
+    global _reranker
+    if _reranker is None:
+        name = _load_config().get("reranker_model")
+        if not name:
+            return None
+        from sentence_transformers import CrossEncoder
+        _reranker = CrossEncoder(name, max_length=512)
+    return _reranker
 
 
-def _get_metadata():
-    global _metadata
-    if _metadata is None:
-        with open(METADATA_PATH, "r", encoding="utf-8") as f:
-            _metadata = json.load(f)
-    return _metadata
+def _get_bm25(metadata: list):
+    """BM25 index over the chunk texts, built once per metadata list."""
+    from rag.keyword_search import BM25
+    key = id(metadata)
+    if key not in _bm25_cache:
+        _bm25_cache[key] = BM25([c["text"] for c in metadata])
+    return _bm25_cache[key]
 
 
 def retrieve(query: str, top_k: int = 5, dynamic_index: dict = None) -> tuple:
     """
-    Embed query and retrieve top_k most similar chunks.
-    If dynamic_index is provided (keys: 'index', 'metadata'), it is used
-    instead of the disk-based index (for uploaded PDFs).
-    Returns (chunks_list, retrieval_time_seconds).
+    Hybrid search: vector ranking (cosine similarity, FAISS IndexFlatIP on
+    normalized vectors) + BM25 keyword ranking, merged with Reciprocal Rank
+    Fusion, then reordered by the reranker if one is configured.
+    dynamic_index is the in-memory index of the uploaded documents
+    (pdf_indexer.build_memory_index). Returns (chunks, retrieval_time_seconds).
     """
+    from rag.keyword_search import reciprocal_rank_fusion
+
+    if not dynamic_index:
+        raise ValueError("No documents loaded. Upload a PDF first.")
+    index, metadata = dynamic_index["index"], dynamic_index["metadata"]
+
     model = _get_embed_model()
-
-    if dynamic_index:
-        index = dynamic_index["index"]
-        metadata = dynamic_index["metadata"]
-    else:
-        index = _get_faiss_index()
-        metadata = _get_metadata()
-
-    start = time.time()
-    q_emb = model.encode([f"query: {query}"], normalize_embeddings=True)
-    q_emb = np.array(q_emb, dtype="float32")
-    scores, indices = index.search(q_emb, top_k)
-    retrieval_time = round(time.time() - start, 3)
-
-    results = []
-    for score, idx in zip(scores[0], indices[0]):
-        if idx < len(metadata):
-            chunk = metadata[idx].copy()
-            chunk["score"] = round(float(score), 4)
-            results.append(chunk)
-
-    return results, retrieval_time
-
-
-# Arabic character name & concept aliases found in the book
-_NAME_ALIASES = {
-    "المؤلف": ["عمرو عبد الحميد"],
-    "الكاتب": ["عمرو عبد الحميد"],
-    "البطل": ["خالد", "خالد حسني"],
-    "الشخصية الرئيسية": ["خالد", "خالد حسني"],
-    "بطل القصة": ["خالد", "خالد حسني"],
-    "الجد": ["عبدو", "جد خالد"],
-    "حبيبته": ["منى"],
-    # How Khaled got to Ard Zikola — via the underground tunnel
-    "أرض زيكولا": ["السرداب", "خالد السرداب"],
-    "وصول": ["السرداب", "نزل السرداب"],
-    "كيف وصل": ["السرداب", "نزل السرداب خالد"],
-}
-
-def _expand_query(query: str) -> list:
-    """Returns a list of search queries: original + alias expansions."""
-    queries = [query]
-    for name, aliases in _NAME_ALIASES.items():
-        if name in query:
-            for alias in aliases:
-                queries.append(query.replace(name, alias))
-    return queries
-
-
-def retrieve_multi(query: str, top_k: int = 5, dynamic_index: dict = None) -> tuple:
-    """
-    Search using multiple query variants and merge + deduplicate results.
-    If dynamic_index is provided, skips alias expansion (book-agnostic mode).
-    Returns (chunks_list, retrieval_time).
-    """
-    # Only use aliases for the hardcoded book; skip for uploaded PDFs
-    queries = [query] if dynamic_index else _expand_query(query)
-    seen_ids = set()
-    all_chunks = []
+    bm25 = _get_bm25(metadata)
     start = time.time()
 
-    for q in queries:
-        chunks, _ = retrieve(q, top_k=top_k, dynamic_index=dynamic_index)
-        for c in chunks:
-            if c["chunk_id"] not in seen_ids:
-                seen_ids.add(c["chunk_id"])
-                all_chunks.append(c)
+    q_emb = model.encode([query_text(model.rag_name, query)], normalize_embeddings=True)
+    _, dense = index.search(np.array(q_emb, dtype="float32"), min(100, index.ntotal))
+    rankings = [
+        [i for i in dense[0] if 0 <= i < len(metadata)],
+        bm25.rank(query),
+    ]
+    fused = reciprocal_rank_fusion(rankings)
+    ranked = sorted(fused, key=fused.get, reverse=True)
+    scores = fused
 
-    all_chunks.sort(key=lambda x: x.get("score", 0), reverse=True)
-    retrieval_time = round(time.time() - start, 3)
-    return all_chunks[:top_k], retrieval_time
+    reranker = _get_reranker()
+    if reranker is not None and ranked:
+        candidates = ranked[:_load_config().get("rerank_candidates", 30)]
+        rerank_scores = reranker.predict([(query, metadata[i]["text"]) for i in candidates])
+        scores = dict(zip(candidates, (float(x) for x in rerank_scores)))
+        ranked = sorted(candidates, key=scores.get, reverse=True)
+
+    chunks = []
+    for i in ranked[:top_k]:
+        chunk = metadata[i].copy()
+        chunk["score"] = round(scores[i], 4)
+        chunks.append(chunk)
+
+    return chunks, round(time.time() - start, 3)
+
+
+def _last_turn(history: list) -> list:
+    """
+    Rolling window: only the latest question and answer are sent with a new
+    question. Sending the whole chat made the prompt grow every turn and pushed
+    the answer time on CPU to about 60 s.
+    """
+    if not history:
+        return []
+    turn = [m for m in history if m["role"] in ("user", "assistant")][-2:]
+    return [m for m in turn if m.get("content")]
+
+
+def _search_query(question: str, history: list) -> str:
+    """Short follow-ups ("and the second one?") are searched together with the last question."""
+    turn = _last_turn(history)
+    last_q = next((m["content"] for m in reversed(turn) if m["role"] == "user"), "")
+    if last_q and len(question.split()) < 8:
+        return f"{last_q} {question}"
+    return question
 
 
 def build_rag_prompt(question: str, chunks: list, history: list = None,
-                    book_name: str = None) -> str:
-    """
-    Build the RAG prompt with 3-way behavior:
-    1. Book question + in context  → answer from context
-    2. Book question + not in context → answer from general knowledge
-    3. Completely unrelated question → politely refuse
-    """
-    context = "\n\n---\n\n".join([c["text"] for c in chunks])
+                     doc_names: str = None) -> str:
+    """Strict prompt: answer only from the passages, otherwise say it is not there."""
+    passages = []
+    for n, c in enumerate(chunks, 1):
+        src = f" ({c['source']})" if c.get("source") else ""
+        passages.append(f"[{n}]{src}\n{c['text']}")
+    context = "\n\n".join(passages) if passages else "(no passages)"
 
     hist_str = ""
-    if history:
-        hist_str = "Previous conversation:\n"
-        for msg in history[-10:]:
-            role = "User" if msg["role"] == "user" else "Assistant"
-            hist_str += f"{role}: {msg['content']}\n"
+    turn = _last_turn(history)
+    if turn:
+        hist_str = "Previous turn (only to understand follow-up questions):\n"
+        for m in turn:
+            role = "User" if m["role"] == "user" else "Assistant"
+            hist_str += f"{role}: {m['content']}\n"
         hist_str += "\n"
 
-    book_intro = f'"{book_name}"' if book_name else "the uploaded book"
+    docs = f" from {doc_names}" if doc_names else ""
+    lang = _language_hint(question)
 
-    prompt = f"""You are a dedicated book assistant specializing in {book_intro}.
+    return f"""Answer the question using ONLY the document passages{docs} below.
 
-YOUR RULES:
-1. You only discuss topics related to this book — its plot, characters, themes, author, genre, writing style, or anything a reader might reasonably ask about it.
-2. If the user asks about something unrelated to the book (e.g., cooking, coding, sports, general trivia), politely decline and redirect them: say something like "I'm here to help you with {book_intro}. Is there something about the book you'd like to know?"
-3. To answer book-related questions, first check the context passages below. If the answer is there, use it.
-4. If the context does NOT contain the answer but the question is still about the book, use your general knowledge about books, storytelling, and the topic to give a helpful answer — do not say "not found".
-5. Always reply in the SAME LANGUAGE as the user's question.
-6. Use the conversation history to resolve pronouns and follow-up references.
+Rules:
+1. Use only facts that are written in the passages. Do not add anything from your own knowledge.
+2. If the passages do not contain the answer, reply only with this sentence (in {lang}): "The provided documents do not contain this information."
+3. Copy numbers, dates and names exactly as they are written in the passages.
+4. Keep the answer short and direct.
 
-{hist_str}Context passages from the book (use when relevant):
+{hist_str}Document passages:
 {context}
 
-User question:
+Question:
 {question}
 
+Write the answer in {lang}, even though the passages may be in another language.
+
 Answer:"""
-    return prompt
 
 
-def _build_followup_query(question: str, history: list) -> str:
-    """
-    Build a richer search query for follow-up questions by including context
-    from both the previous user question AND the assistant's answer.
-    """
-    if not history or len(history) < 2:
-        return question
-
-    # Only enhance short questions (likely follow-ups with pronouns)
-    if len(question.split()) >= 15:
-        return question
-
-    # Gather context from recent history
-    last_user_q = ""
-    last_assistant_a = ""
-
-    for msg in reversed(history):
-        if msg["role"] == "assistant" and not last_assistant_a:
-            # Take first 100 chars of assistant answer as context
-            last_assistant_a = msg["content"][:100]
-        elif msg["role"] == "user" and not last_user_q:
-            last_user_q = msg["content"]
-        if last_user_q and last_assistant_a:
-            break
-
-    # Combine: previous question + key part of answer + current question
-    parts = []
-    if last_user_q:
-        parts.append(last_user_q)
-    if last_assistant_a:
-        parts.append(last_assistant_a)
-    parts.append(question)
-
-    return " ".join(parts)
+_SCRIPTS = [
+    ("\u0600", "\u06ff", "Arabic"), ("\u0400", "\u04ff", "Russian"),
+    ("\u0590", "\u05ff", "Hebrew"), ("\u0900", "\u097f", "Hindi"),
+    ("\u3040", "\u30ff", "Japanese"), ("\uac00", "\ud7af", "Korean"),
+    ("\u4e00", "\u9fff", "Chinese"), ("\u0e00", "\u0e7f", "Thai"),
+]
 
 
-def ask(question: str, model: str = None, top_k: int = 2, history: list = None,
-        dynamic_index: dict = None, book_name: str = None) -> dict:
-    """
-    Full RAG pipeline: retrieve → build prompt → generate answer.
-    Pass dynamic_index + book_name for uploaded PDFs.
-    """
+# Common words of Latin-script languages, for naming the reply language offline
+_WORDS = {
+    "German": "ich du der die das und ist nicht wie was wer wo wann warum mein meine ein eine mit für auf hoch viele kann darf gibt es bei",
+    "French": "je tu le la les et est pas comment quoi qui où quand pourquoi mon ma mes un une avec pour sur combien peux",
+    "Spanish": "yo el la los las y es no cómo qué quién dónde cuándo por mi mis un una con para cuántos cuántas puedo",
+    "Italian": "io il lo la gli e è non come cosa chi dove quando perché mio mia un una con per quanti quante posso",
+    "Portuguese": "eu o a os as e é não como que quem onde quando por meu minha um uma com para quantos quantas posso",
+    "Dutch": "ik de het een en is niet hoe wat wie waar wanneer waarom mijn met voor op hoeveel kan mag",
+    "Turkish": "ben bir ve bu ne nasıl kim nerede neden benim için kaç mı mi var",
+    "English": "i you the a an and is are not how what who where when why my with for on many much can do does",
+}
+
+
+def _language_hint(question: str) -> str:
+    """Name the reply language: by script, or by common words for Latin scripts."""
+    for lo, hi, name in _SCRIPTS:
+        if sum(lo <= ch <= hi for ch in question) >= 2:
+            return name
+    import re
+    tokens = set(re.findall(r"[^\W\d_]+", question.lower()))
+    scores = {lang: sum(t in set(words.split()) for t in tokens) for lang, words in _WORDS.items()}
+    best = max(scores, key=scores.get)
+    if scores[best] > 0 and list(scores.values()).count(scores[best]) == 1:
+        return best
+    return "the same language as the question"
+
+
+def _resolve_model(model: str = None) -> str:
+    if model:
+        return model
+    cfg = _load_config()
+    return cfg.get("chosen_model") or cfg["models"][0]
+
+
+def ask(question: str, model: str = None, top_k: int = 5, history: list = None,
+        dynamic_index: dict = None, doc_names: str = None) -> dict:
+    """Full pipeline without streaming (used by the eval scripts)."""
     from rag.ollama_client import generate
 
-    if model is None:
-        cfg = _load_config()
-        model = cfg.get("chosen_model") or cfg["models"][0]
+    model = _resolve_model(model)
+    chunks, retrieval_time = retrieve(_search_query(question, history), top_k, dynamic_index)
+    prompt = build_rag_prompt(question, chunks, history, doc_names)
+    system = f"{SYSTEM_PROMPT} Answer in {_language_hint(question)}."
 
-    search_query = _build_followup_query(question, history)
-    effective_top_k = top_k + 1 if history and len(question.split()) < 10 else top_k
-
-    chunks, retrieval_time = retrieve_multi(search_query, top_k=effective_top_k,
-                                            dynamic_index=dynamic_index)
-    chunk_ids = [c["chunk_id"] for c in chunks]
-
-    rag_prompt = build_rag_prompt(question, chunks, history, book_name=book_name)
     start = time.time()
-    result = generate(model, rag_prompt, system=SYSTEM_PROMPT, temperature=0.2, max_tokens=512)
-    generation_time = round(time.time() - start, 3)
-
+    result = generate(model, prompt, system=system, temperature=0.1, max_tokens=512)
+    answer = ensure_language(result["text"], question, model)
     return {
-        "answer": result["text"],
-        "sources": chunk_ids,
+        "answer": answer,
+        "sources": [c["chunk_id"] for c in chunks],
         "retrieval_time": retrieval_time,
-        "generation_time": generation_time,
+        "generation_time": round(time.time() - start, 3),
         "model": model,
         "chunks": chunks,
     }
 
-def ask_stream(question: str, model: str = None, top_k: int = 2, history: list = None,
-               dynamic_index: dict = None, book_name: str = None):
+
+def ask_stream(question: str, model: str = None, top_k: int = 5, history: list = None,
+               dynamic_index: dict = None, doc_names: str = None):
+    """Full pipeline, answer streamed word by word. Returns (stream, chunks, retrieval_time, start)."""
     from rag.ollama_client import generate_stream
 
-    if model is None:
-        cfg = _load_config()
-        model = cfg.get("chosen_model") or cfg["models"][0]
+    model = _resolve_model(model)
+    chunks, retrieval_time = retrieve(_search_query(question, history), top_k, dynamic_index)
+    prompt = build_rag_prompt(question, chunks, history, doc_names)
+    system = f"{SYSTEM_PROMPT} Answer in {_language_hint(question)}."
 
-    search_query = _build_followup_query(question, history)
-    effective_top_k = top_k + 1 if history and len(question.split()) < 10 else top_k
-
-    chunks, retrieval_time = retrieve_multi(search_query, top_k=effective_top_k,
-                                            dynamic_index=dynamic_index)
-    chunk_ids = [c["chunk_id"] for c in chunks]
-
-    rag_prompt = build_rag_prompt(question, chunks, history, book_name=book_name)
     start = time.time()
-    raw_stream = generate_stream(model, rag_prompt, system=SYSTEM_PROMPT, temperature=0.2, max_tokens=512)
+    stream = generate_stream(model, prompt, system=system, temperature=0.1, max_tokens=512)
+    return stream, chunks, retrieval_time, start
 
-    return raw_stream, chunk_ids, retrieval_time, start
+
+def ensure_language(answer: str, question: str, model: str = None) -> str:
+    """
+    Small models often answer in the language of the passages instead of the
+    question. If the answer is clearly in another language than the question,
+    translate it with the same local model. Returns the answer unchanged otherwise.
+    """
+    from rag.ollama_client import generate
+
+    want = _language_hint(question)
+    got = _language_hint(answer)
+    unknown = "the same language as the question"
+    if want == unknown or got == unknown or want == got or not answer.strip():
+        return answer
+    result = generate(
+        _resolve_model(model),
+        f"Translate the following text into {want}. Keep all numbers and names exactly. "
+        f"Reply with the translation only.\n\nText:\n{answer.strip()}",
+        system=f"You are a translator. You always write in {want}.",
+        temperature=0.0, max_tokens=512,
+    )
+    return result["text"].strip() or answer
+
+
+_LLM_ONLY_PROMPT = "Answer briefly (at most 100 words), in the same language as the question.\n\nQuestion:\n{q}\n\nAnswer:"
 
 
 def ask_llm_only(question: str, model: str = None) -> dict:
+    """The model alone, without documents (the "Use RAG Sources" switch turned off)."""
     from rag.ollama_client import generate
-    if model is None:
-        cfg = _load_config()
-        model = cfg.get("chosen_model") or cfg["models"][0]
-
-    prompt = f"""أجب بشكل مختصر جدا وبنفس لغة السؤال (لا تتجاوز 100 كلمة):\n\nالسؤال:\n{question}\n\nالإجابة:"""
+    model = _resolve_model(model)
     start = time.time()
-    result = generate(model, prompt, temperature=0.3, max_tokens=150)
-    generation_time = round(time.time() - start, 3)
-
+    result = generate(model, _LLM_ONLY_PROMPT.format(q=question), temperature=0.3, max_tokens=200)
     return {
         "answer": result["text"],
         "sources": [],
         "retrieval_time": 0,
-        "generation_time": generation_time,
+        "generation_time": round(time.time() - start, 3),
         "model": model,
     }
 
+
 def ask_llm_only_stream(question: str, model: str = None):
     from rag.ollama_client import generate_stream
-    if model is None:
-        cfg = _load_config()
-        model = cfg.get("chosen_model") or cfg["models"][0]
-
-    prompt = f"""أجب بشكل مختصر جدا وبنفس لغة السؤال (لا تتجاوز 100 كلمة):\n\nالسؤال:\n{question}\n\nالإجابة:"""
+    model = _resolve_model(model)
     start = time.time()
-    stream = generate_stream(model, prompt, temperature=0.3, max_tokens=150)
-    
+    stream = generate_stream(model, _LLM_ONLY_PROMPT.format(q=question), temperature=0.3, max_tokens=200)
     return stream, [], 0, start
-
-if __name__ == "__main__":
-    q = "ما هي الفكرة الرئيسية في الكتاب؟"
-    print("RAG answer:")
-    result = ask(q)
-    print(result["answer"][:300])
-    print(f"Sources: {result['sources']}")
-    print(f"Retrieval: {result['retrieval_time']}s, Generation: {result['generation_time']}s")

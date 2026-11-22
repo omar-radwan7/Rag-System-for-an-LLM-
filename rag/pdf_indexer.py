@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-pdf_indexer.py — Extract text from a PDF, chunk it, and build an in-memory
-FAISS index so any book can be loaded at runtime without touching disk indexes.
+pdf_indexer.py — Uploaded PDFs -> clean text -> overlapping chunks -> vectors ->
+in-memory FAISS index.
+
+Everything stays in RAM: the documents are never written to disk, and the index
+is gone when the session ends.
 """
 
 import io
-import re
 import json
 import os
+import re
 import sys
 import numpy as np
 
@@ -15,106 +18,107 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config.json")
 
-CHUNK_SIZE = 300    # target words per chunk
-CHUNK_OVERLAP = 50  # words of overlap between chunks
-
 
 def _load_config():
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    """Extract all text from a PDF given its raw bytes."""
+def extract_text_from_pdf(pdf_bytes: bytes) -> list:
+    """Raw text of every page, as a list of (page_number, text)."""
     from pypdf import PdfReader
+    from rag.arabic_fix import fix_arabic_ligatures
+
     reader = PdfReader(io.BytesIO(pdf_bytes))
     pages = []
-    for page in reader.pages:
-        text = page.extract_text()
-        if text:
-            pages.append(text.strip())
-    return "\n\n".join(pages)
+    for n, page in enumerate(reader.pages, 1):
+        text = page.extract_text() or ""
+        if text.strip():
+            pages.append((n, fix_arabic_ligatures(text)))
+    return pages
 
 
-def chunk_text(text: str) -> list:
+def normalize_text(text: str) -> str:
     """
-    Split text into overlapping word-based chunks.
-    Returns a list of dicts: {chunk_id, text, word_count}
+    Regex cleanup of extracted PDF text: page numbers on their own line,
+    words split by a hyphen at a line end, broken lines inside a paragraph,
+    and repeated spaces.
     """
-    words = text.split()
-    chunks = []
-    start = 0
-    chunk_id = 0
+    text = text.replace("\r", "\n").replace(" ", " ")
+    text = re.sub(r"(?m)^\s*(page\s*)?\d{1,4}(\s*/\s*\d{1,4})?\s*$", "", text, flags=re.I)
+    text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
+    text = re.sub(r"\n{2,}", " ", text)        # keep paragraph breaks
+    text = re.sub(r"\s*\n\s*", " ", text)           # join broken lines
+    text = text.replace(" ", "\n\n")
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text.strip()
 
-    while start < len(words):
-        end = min(start + CHUNK_SIZE, len(words))
-        chunk_words = words[start:end]
-        chunk_text_str = " ".join(chunk_words)
-        chunks.append({
-            "chunk_id": chunk_id,
-            "text": chunk_text_str,
-            "word_count": len(chunk_words),
-            "chapter": "",
-        })
-        chunk_id += 1
-        # Advance by CHUNK_SIZE - CHUNK_OVERLAP for overlap
-        start += CHUNK_SIZE - CHUNK_OVERLAP
-        if end == len(words):
+
+def chunk_text(text: str, size: int = 500, overlap: int = 150) -> list:
+    """
+    Sliding window over characters: chunks of about `size` characters, each
+    sharing `overlap` characters with the previous one so a sentence cut at a
+    border is still complete in one of them. Borders are moved back to the
+    nearest space so words are never cut.
+    """
+    chunks, start = [], 0
+    while start < len(text):
+        end = min(start + size, len(text))
+        if end < len(text):
+            space = text.rfind(" ", start + size // 2, end)
+            if space != -1:
+                end = space
+        piece = text[start:end].strip()
+        if piece:
+            chunks.append(piece)
+        if end >= len(text):
             break
-
+        next_start = end - overlap
+        space = text.find(" ", next_start, end)
+        start = space + 1 if space != -1 else next_start
     return chunks
 
 
-def build_memory_index(pdf_bytes: bytes) -> dict:
+def build_memory_index(files: list) -> dict:
     """
-    Full pipeline: PDF bytes → text → chunks → embeddings → in-memory FAISS index.
-    Returns a dict with keys: 'index', 'metadata', 'book_name'.
-    The returned object can be passed directly to the RAG pipeline.
+    files: list of (file_name, pdf_bytes).
+    Returns {'index', 'metadata', 'chunk_count', 'doc_names'}; pass it to the
+    pipeline as dynamic_index.
     """
     import faiss
-    from sentence_transformers import SentenceTransformer
+    from rag.models import passage_text
+    from rag.rag_pipeline import _get_embed_model
 
     cfg = _load_config()
-    embed_model_name = cfg.get("embedding_model", "intfloat/multilingual-e5-small")
+    size = cfg.get("chunk_size_chars", 500)
+    overlap = cfg.get("chunk_overlap_chars", 150)
 
-    # Extract text
-    full_text = extract_text_from_pdf(pdf_bytes)
-    if not full_text.strip():
-        raise ValueError("Could not extract any text from the PDF. It may be a scanned image.")
+    metadata = []
+    for name, pdf_bytes in files:
+        for page, raw in extract_text_from_pdf(pdf_bytes):
+            for piece in chunk_text(normalize_text(raw), size, overlap):
+                metadata.append({
+                    "chunk_id": len(metadata),
+                    "source": f"{name}, p. {page}",
+                    "text": piece,
+                })
 
-    # Chunk
-    chunks = chunk_text(full_text)
-    if not chunks:
-        raise ValueError("PDF text was extracted but produced no chunks.")
+    if not metadata:
+        raise ValueError("No text could be extracted. The PDF may be a scanned image.")
 
-    # Embed
-    # Reuse the already-loaded model from rag_pipeline globals if available
-    from rag.rag_pipeline import _get_embed_model
     model = _get_embed_model()
-
-    texts = [f"passage: {c['text']}" for c in chunks]
-    embeddings = model.encode(texts, show_progress_bar=False, batch_size=32,
+    texts = [passage_text(model.rag_name, c["text"]) for c in metadata]
+    embeddings = model.encode(texts, show_progress_bar=False, batch_size=16,
                               normalize_embeddings=True)
     embeddings = np.array(embeddings, dtype="float32")
 
-    # Build FAISS index (in-memory only)
-    dim = embeddings.shape[1]
-    index = faiss.IndexFlatIP(dim)
+    # Inner product on normalized vectors = cosine similarity
+    index = faiss.IndexFlatIP(embeddings.shape[1])
     index.add(embeddings)
-
-    metadata = [
-        {
-            "chunk_id": c["chunk_id"],
-            "chapter": c.get("chapter", ""),
-            "text": c["text"],
-            "word_count": c["word_count"],
-        }
-        for c in chunks
-    ]
 
     return {
         "index": index,
         "metadata": metadata,
-        "chunk_count": len(chunks),
-        "text_preview": full_text[:200],
+        "chunk_count": len(metadata),
+        "doc_names": ", ".join(name for name, _ in files),
     }

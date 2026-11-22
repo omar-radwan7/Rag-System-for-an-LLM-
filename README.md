@@ -1,124 +1,125 @@
-# RAG System for Enterprise Documentation
+# Offline Multilingual RAG for Your Documents
 
-## Overview
+Ask questions about your own PDFs and get answers that come only from those documents. Everything runs on your own machine: no cloud, no API keys, and no document ever leaves the computer. It works with documents and questions in different languages, and it runs on an ordinary 8 GB laptop without a GPU.
 
-This project is a Retrieval-Augmented Generation (RAG) system designed to transform static documents (PDFs) into interactive, context-aware knowledge bases. It explores the intersection of data privacy, local Large Language Model (LLM) inference, and multilingual information retrieval.
+This is the system from my bachelor thesis, *Development of a Multilingual RAG System for Enterprise Documentation*. It is open source so anyone can run it on their own documents and adapt it to their own setup.
 
-Developed as part of a research and development initiative at the Applied Innovation Center (AIC), the system addresses the need for organizations to interact with sensitive internal data without uploading it to external servers. This project serves as the foundation for a bachelor's thesis focused on privacy-preserving, locally deployed RAG architectures.
+![Answer with sources](docs/screenshots/answer_with_sources.jpg)
 
-## Pipeline
+![Questions in English, Arabic and German](docs/screenshots/multilingual.jpg)
+
+*The screenshots use [a fictional company handbook](docs/example/northwind_handbook.pdf) written in English. Questions asked in Arabic and German are answered in the language of the question. The last question is not covered by the document, so the system says so instead of guessing.*
+
+## What it does
+
+- **Answers only from your documents.** The prompt forbids the model from using its own knowledge. If the answer is not in the documents, it replies that the documents do not contain this information.
+- **Any language.** The question, the document and the answer do not have to share a language. A question in Arabic about an English PDF gets an Arabic answer.
+- **Shows its sources.** Every answer lists the passages it used, with file name and page, and you can open each one to read the exact text.
+- **Private by design.** Uploaded PDFs and their index live only in memory. Chats are not saved and disappear when the browser session ends.
+- **Runs on modest hardware.** The default setup needs about 4.5 GB of RAM in total (measured on a CPU only laptop).
+
+## How it works
 
 ![Pipeline](docs/screenshots/pipeline.png)
 
+1. **Upload.** One or more PDFs are uploaded in the sidebar and kept in RAM.
+2. **Extract and clean.** pypdf extracts the text of every page. Regex rules remove page numbers, join broken lines and repair Arabic letters that some PDF fonts store in the wrong order.
+3. **Chunk.** A sliding window splits the text into chunks of 500 characters with 150 characters of overlap, so a sentence cut at a border is still complete in the neighbouring chunk.
+4. **Embed and index.** A multilingual embedding model (BAAI/bge-m3) turns every chunk into a vector, stored in a FAISS IndexFlatIP index (cosine similarity on normalized vectors).
+5. **Retrieve.** The question is embedded with the same model. Vector search and BM25 keyword search each rank the chunks, and Reciprocal Rank Fusion combines both rankings. An optional cross-encoder reranker can reorder the best candidates.
+6. **Build the prompt.** The top chunks go into a strict prompt that allows only facts from the passages. Only the latest question and answer of the chat are included (rolling window), which keeps the prompt short.
+7. **Generate.** A local 4-bit model answers through Ollama on the CPU, streamed word by word.
+8. **Check the language.** If a small model answers in the language of the passages instead of the question, the answer is translated into the question's language by the same local model.
+
 ## Results
 
-All tests ran on a CPU only laptop (Intel Core i7, 8 GB RAM) with 4-bit quantized models served by Ollama.
+From the thesis benchmarks on an Intel Core i7 laptop with 8 GB RAM and no GPU, using 4-bit models in Ollama:
 
 | Model | Answer time | Peak RAM | Speed |
 |---|---|---|---|
 | Qwen2.5 0.5B | 8.45 s | 1.15 GB | 18.2 tok/s |
-| **Qwen2.5 3B (chosen)** | **24.16 s** | **3.22 GB** | **6.8 tok/s** |
+| Qwen2.5 3B | 24.16 s | 3.22 GB | 6.8 tok/s |
 | Llama3 8B | 41.38 s | 6.85 GB | 2.4 tok/s |
 
-- **Memory:** with Llama3 8B the whole system needed 9.30 GB and went past the 8 GB limit. Qwen2.5 3B keeps the peak at 3.22 GB.
-- **Response time:** long chats made the prompt grow with every turn and answers took up to 60 s. A rolling context window that sends only the latest turn with the new document chunks brought this down to about 4 s.
-- **Grounding:** with RAG turned off, the model invented server paths and passwords for a question the document did not cover. With RAG on, it answered that the information was not in the document.
+- **Memory:** with Llama3 8B the whole system needed 9.30 GB and went past the 8 GB limit. The smaller models fit with room to spare.
+- **Response time:** sending the full chat history made the prompt grow with every turn, and answers took up to 60 s. The rolling window brought this down to about 4 s in the thesis tests.
+- **Grounding:** with retrieval turned off, the model invented server paths and passwords for a question the document did not cover. With retrieval on, it answered that the information was not in the document.
 
 ![Memory usage](docs/screenshots/memory.png)
 
-## Problem Statement
+**Default model.** After the thesis I compared the installed small models on multilingual questions. gemma2:2b followed the question's language and copied facts more reliably than qwen2.5:3b and llama3.2:3b, and it is smaller, so it is now the default. Any Ollama model can be selected in the sidebar.
 
-Modern Large Language Models face key challenges when applied to enterprise use cases:
+## Getting started
 
-1. **Knowledge Cutoffs and Hallucinations**: Standard LLMs are limited to their training data and often produce factually incorrect responses when asked about documents not included in their pre-training.
-2. **Data Privacy and Sovereignty**: Cloud-based AI solutions require uploading sensitive documents to external servers, which is often prohibited by institutional security policies or regulations such as GDPR.
-3. **Multilingual Support**: The system is designed to process and respond in multiple languages, since enterprise documentation is not always written in a single language.
+### Requirements
 
-## The Proposed Solution
+- [Ollama](https://ollama.com) installed and running
+- Python 3.10 or newer
+- About 3 GB of disk space for the embedding model and 2 GB for the language model
 
-This system implements a fully local RAG pipeline. By decoupling the knowledge base from the model's internal weights, the system ensures that:
+### Install
 
-- Information is retrieved directly from the provided source documents, reducing hallucinations regarding document content.
-- All processing occurs on local hardware via Ollama, ensuring no data leaves the local machine.
-- The system supports multilingual queries through a multilingual embedding model.
-
-## Key Technical Features
-
-### In-Memory Vector Indexing
-
-When a user uploads a PDF, the system performs text extraction, sliding-window chunking, and vector embedding. These vectors are stored in a local FAISS (Facebook AI Similarity Search) index, allowing fast retrieval without external database dependencies.
-
-### Multilingual Embeddings
-
-The system uses a multilingual embedding model, allowing it to process and retrieve relevant context across different languages without requiring separate pipelines per language.
-
-### Strict Context-Grounded Generation
-
-The system uses a constrained prompt template that instructs the model to answer only using the retrieved document context. If the requested information is not present in the retrieved chunks, the model is instructed to state that the information is not available, rather than generating a speculative answer.
-
-## Technical Architecture
-
-The pipeline is structured into three layers:
-
-1. **Ingestion Layer**: Extracts text from PDFs and applies sliding-window chunking to preserve context across chunk boundaries.
-2. **Retrieval Layer**: Uses FAISS for similarity search over document embeddings.
-3. **Generation Layer**: Uses the Ollama REST API to interface with local, quantized open-source models such as Qwen2.5 and Llama 3.
-
-## Research Value
-
-This project supports investigation into:
-
-- **Efficiency vs. Accuracy**: How chunk size and overlap affect retrieval precision.
-- **Local Inference Benchmarking**: Trade-offs between model quantization (e.g., 4-bit) and response quality on consumer-grade hardware.
-- **Hallucination Mitigation**: Whether strict prompt constraints can reliably prevent a language model from generating unsupported answers.
-
-## Project Structure
-
-```
-Rag-System-for-an-LLM/
-├── rag/                 # Core RAG pipeline
-│   ├── pdf_indexer.py   # PDF processing and FAISS indexing
-│   ├── rag_pipeline.py  # Prompt construction and retrieval logic
-│   └── ollama_client.py # Wrapper for the Ollama REST API
-├── ui/                  # Frontend interface
-│   ├── app.py            # Streamlit chat interface
-│   └── chat_storage.json # Session management
-├── eval/                 # Evaluation framework
-│   ├── eval_runner.py    # Performance and accuracy benchmarking
-│   └── gold_questions.json # Standardized test set
-├── data/                  # Dataset management and preprocessing
-├── results/               # Performance logs and benchmarking outputs
-└── config.json            # System configuration
+```bash
+git clone https://github.com/omar-radwan7/Rag-System-for-an-LLM-.git
+cd Rag-System-for-an-LLM-
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+ollama pull gemma2:2b
 ```
 
-## Getting Started
+### Run
 
-### Prerequisites
-
-- Ollama installed and running (https://ollama.ai)
-- Python 3.9 or higher
-
-### Installation
-
-1. Clone the repository.
-2. Create a virtual environment: `python -m venv venv`
-3. Install dependencies: `pip install -r requirements.txt`
-
-### Model Configuration
-
-The system is optimized for the Qwen2.5:3B model, which offers a balance between response quality and performance on CPU-only hardware.
-
-Pull the model:
-```
-ollama pull qwen2.5:3b
-```
-
-### Execution
-
-Run the Streamlit interface:
-```
+```bash
 streamlit run ui/app.py
 ```
+
+Open the address Streamlit prints, upload a PDF in the sidebar and ask a question. The embedding model is downloaded once on first use. After that, everything works offline.
+
+## Configuration
+
+All settings are in `config.json`:
+
+| Key | Meaning |
+|---|---|
+| `chosen_model` | Default Ollama model (any installed model can also be picked in the sidebar) |
+| `embedding_model` | Sentence Transformers model for the vectors. `intfloat/multilingual-e5-small` is a lighter option |
+| `reranker_model` | Optional cross-encoder, for example `BAAI/bge-reranker-v2-m3`. Off by default because it adds about 2.5 GB of RAM and several seconds per question |
+| `chunk_size_chars`, `chunk_overlap_chars` | Sliding window size and overlap |
+| `top_k_retrieval` | Default number of passages per answer |
+
+## Evaluate on your own documents
+
+Write a few questions with expected answers (see `eval/gold_questions.example.json`) and run:
+
+```bash
+python eval/eval_runner.py your_document.pdf --gold your_questions.json
+```
+
+It compares the model alone with the model plus retrieval and writes the results to `results/`.
+
+## Project structure
+
+```
+rag/
+  pdf_indexer.py     PDF extraction, cleanup, chunking, in-memory FAISS index
+  rag_pipeline.py    Hybrid retrieval, strict prompt, rolling window, language check
+  keyword_search.py  BM25 and Reciprocal Rank Fusion
+  arabic_fix.py      Repairs Arabic letters swapped by PDF extraction
+  models.py          Embedding model prefixes (e5 vs others)
+  ollama_client.py   Local Ollama API
+ui/
+  app.py             Streamlit interface
+eval/
+  eval_runner.py     LLM only vs RAG on your documents
+docs/
+  example/           Fictional handbook used in the screenshots
+config.json
+```
+
+## Background
+
+The project started during my internship at the Applied Innovation Center (AIC), where the goal was a question answering bot for an Egyptian Arabic novel. I built that version, and after the internship I turned it into a general tool: any documents, any language, and answers strictly limited to what the documents say. The bachelor thesis describes and evaluates this version.
 
 ## License
 

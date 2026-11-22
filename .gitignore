@@ -1,2 +1,8 @@
-data/*.pdf
-Rag/faiss.index
+__pycache__/
+*.pyc
+venv/
+*.pdf
+!docs/**/*.pdf
+ui/chat_storage.json
+*.log
+results/
