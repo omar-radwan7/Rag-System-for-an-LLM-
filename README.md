@@ -6,6 +6,30 @@ This project is a Retrieval-Augmented Generation (RAG) system designed to transf
 
 Developed as part of a research and development initiative at the Applied Innovation Center (AIC), the system addresses the need for organizations to interact with sensitive internal data without uploading it to external servers. This project serves as the foundation for a bachelor's thesis focused on privacy-preserving, locally deployed RAG architectures.
 
+## Screenshots
+
+| Chat interface | End-to-end pipeline |
+|---|---|
+| ![Chat interface](docs/screenshots/app.png) | ![Pipeline](docs/screenshots/pipeline.png) |
+
+A short slide overview of the project is in [docs/RAG_Thesis_Slides.pdf](docs/RAG_Thesis_Slides.pdf).
+
+## Results
+
+All tests ran on a CPU only laptop (Intel Core i7, 8 GB RAM) with 4-bit quantized models served by Ollama.
+
+| Model | Answer time | Peak RAM | Speed |
+|---|---|---|---|
+| Qwen2.5 0.5B | 8.45 s | 1.15 GB | 18.2 tok/s |
+| **Qwen2.5 3B (chosen)** | **24.16 s** | **3.22 GB** | **6.8 tok/s** |
+| Llama3 8B | 41.38 s | 6.85 GB | 2.4 tok/s |
+
+- **Memory:** with Llama3 8B the whole system needed 9.30 GB and went past the 8 GB limit. Qwen2.5 3B keeps the peak at 3.22 GB.
+- **Response time:** long chats made the prompt grow with every turn and answers took up to 60 s. A rolling context window that sends only the latest turn with the new document chunks brought this down to about 4 s.
+- **Grounding:** with RAG turned off, the model invented server paths and passwords for a question the document did not cover. With RAG on, it answered that the information was not in the document.
+
+![Memory usage](docs/screenshots/memory.png)
+
 ## Problem Statement
 
 Modern Large Language Models face key challenges when applied to enterprise use cases:
